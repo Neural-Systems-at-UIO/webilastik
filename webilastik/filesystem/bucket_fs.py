@@ -32,28 +32,35 @@ def _requests_from_data_proxy(
 ) -> "Tuple[bytes, CaseInsensitiveDict[str]] | FsFileNotFoundException | Exception":
     from webilastik.libebrains.global_user_login import GlobalLogin
     user_token = GlobalLogin.get_token()
-    response_result = safe_request(
-        session=_data_proxy_session,
-        method=method,
-        url=url,
-        data=data,
-        headers=user_token.as_ebrains_auth_header(),
-    )
-    if isinstance(response_result, tuple):
-        return response_result
-    if isinstance(response_result, ErrRequestCrashed):
-        return response_result
-    if response_result.status_code == 404:
-        return FsFileNotFoundException(url.path) #FIXME
-    if response_result.status_code != 401 or not refresh_on_401:
-        return response_result
-    refreshed_token_result = GlobalLogin.refresh_token(stale_token=user_token)
-    if isinstance(refreshed_token_result, Exception):
-        logger.error(f"Could not refreshed ebrains token in BucketFS")
-        return refreshed_token_result
-    return _requests_from_data_proxy(
-        method=method, url=url, data=data, refresh_on_401=False
-    )
+    # Changed safe_request to a normal request after object storage migration - Consulation with Oliver S
+    try:
+        response = _data_proxy_session.request(
+            method=method, 
+            url=url.schemeless_raw, 
+            data=data, 
+            headers=user_token.as_ebrains_auth_header()
+        )
+        if response.status_code == 404:
+            return FsFileNotFoundException(url.path) #FIXME
+        if response.status_code == 401 and refresh_on_401:
+            refreshed_token_result = GlobalLogin.refresh_token(stale_token=user_token)
+            if isinstance(refreshed_token_result, Exception):
+                logger.error(f"Could not refreshed ebrains token in BucketFS")
+                return refreshed_token_result
+            return _requests_from_data_proxy(
+                method=method, url=url, data=data, refresh_on_401=False
+            )
+        if not response.ok:
+            return ErrRequestCompletedAsFailure(response.status_code)
+        return (response.content, response.headers)
+    except Exception as e:
+        return ErrRequestCrashed(e)
+        if not response.ok:
+            return ErrRequestCompletedAsFailure(response.status_code)
+        return (response.content, response.headers)
+    except Exception as e:
+        return ErrRequestCrashed(e)
+
 
 class BucketFs(IFilesystem):
     API_URL = Url(protocol="https", hostname="data-proxy.ebrains.eu", path=PurePosixPath("/api/v1/buckets"))
