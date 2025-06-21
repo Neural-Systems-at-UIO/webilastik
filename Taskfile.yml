@@ -9,7 +9,7 @@ vars:
   PKG_NAME: webilastik_{{.PKG_VERSION}}
   ENV_PATH: "{{.BUILD_DIR}}/webilastik_conda_env"
   ENV_CHECKSUM_PATH: "{{.BUILD_DIR}}/environment.yml.sha256"
-  PACKED_ENV_PATH: "{{.ENV_PATH}}.tar.gz"
+  PACKED_ENV_PATH: "{{.ENV_PATH}}.zip"
   DEB_TREE_PATH: "{{.BUILD_DIR}}/deb_tree"
   WEBILASTIK_UNIT_INSTALL_PATH: "/lib/systemd/system/webilastik.service"
   WEBILASTIK_DEV_UNIT_CONFIG_DIR: "/etc/systemd/system/webilastik.service.d"
@@ -73,7 +73,7 @@ tasks:
     generates: ["{{.PACKED_ENV_PATH}}"]
     cmds:
       - rm -f {{.PACKED_ENV_PATH}}
-      - conda pack -p {{.ENV_PATH}} -o {{.PACKED_ENV_PATH}}
+      - cd {{.ENV_PATH}} && zip -r {{.PACKED_ENV_PATH}} .
 
   create-neuroglancer-git-dir:
     run: once
@@ -210,7 +210,7 @@ tasks:
 
       - echo 2>&1 '[INFO] Unpacking conda environment'
       - mkdir -p {{.DEB_TREE_PATH}}/opt/webilastik/conda_env
-      - tar -xzf {{.PACKED_ENV_PATH}} -C {{.DEB_TREE_PATH}}/opt/webilastik/conda_env
+      - unzip -q {{.PACKED_ENV_PATH}} -d {{.DEB_TREE_PATH}}/opt/webilastik/conda_env
 
       - echo 2>&1 '[INFO] Copying webilastik files'
       - mkdir -p {{.DEB_TREE_PATH}}/opt/webilastik
