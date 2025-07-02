@@ -10,9 +10,12 @@ from requests.models import CaseInsensitiveDict
 from webilastik.utility.url import Url
 
 class ErrRequestCompletedAsFailure(Exception):
-    def __init__(self, status_code: int) -> None:
+    def __init__(self, status_code: int, response_text: str = "", url: str = "", headers: "CaseInsensitiveDict[str] | None" = None) -> None:
         self.status_code = status_code
-        super().__init__(f"Request completed but with a failure response: {status_code}")
+        self.response_text = response_text
+        self.url = url
+        self.headers = headers or CaseInsensitiveDict()
+        super().__init__(f"Request completed but with a failure response: {status_code} for URL: {url}")
 
 class ErrRequestCrashed(Exception):
     def __init__(self, cause: Exception) -> None:
@@ -45,7 +48,12 @@ def request(
     try:
         response = session.request(method=method, url=url.schemeless_raw, data=data, headers=headers)
         if not response.ok:
-            return ErrRequestCompletedAsFailure(response.status_code)
+            return ErrRequestCompletedAsFailure(
+                status_code=response.status_code,
+                response_text=response.text[:1000],  # Limit to first 1000 chars
+                url=url.schemeless_raw,
+                headers=response.headers
+            )
         content = response.content
         if num_bytes is not None:
             content = content[:num_bytes]
