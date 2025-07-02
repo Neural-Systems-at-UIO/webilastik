@@ -29,3 +29,5 @@ dependencies:
     - dask-mpi==2022.4.0
     - distributed==2022.4.0
     - mpi4py==3.1.4
+    - go-task-bin
+    - black
