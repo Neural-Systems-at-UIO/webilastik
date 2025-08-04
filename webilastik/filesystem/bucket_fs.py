@@ -59,7 +59,12 @@ def _requests_from_data_proxy(
             logger.error(f"BucketFS: Data proxy request failed with status {response.status_code}")
             logger.error(f"BucketFS: Data proxy response text: {response.text[:1000]}")
             logger.error(f"BucketFS: Data proxy response headers: {dict(response.headers)}")
-            return ErrRequestCompletedAsFailure(response.status_code)
+            return ErrRequestCompletedAsFailure(
+                status_code=response.status_code,
+                response_text=response.text[:1000],
+                url=url.schemeless_raw,
+                headers=response.headers
+            )
         return (response.content, response.headers)
     except Exception as e:
         logger.error(f"BucketFS: Data proxy request crashed: {e}")
