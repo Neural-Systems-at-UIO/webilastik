@@ -152,3 +152,108 @@ class WsPixelClassificationApplet(WsApplet, PixelClassificationApplet):
             body=resp,
             content_type="application/octet-stream",
         )
+
+    async def predictions_precomputed_chunks_info_head(self, request: web.Request) -> web.Response:
+        """HEAD handler for precomputed chunks info - returns same headers as GET but without body"""
+        classifier = self._state.classifier
+        if not isinstance(classifier, PixelClassifier):
+            return web.Response(status=412, headers={"Content-Type": "application/json"})
+
+        ds_result = get_encoded_datasource_from_url(match_info_key="encoded_raw_data", request=request)
+        if isinstance(ds_result, Exception):
+            return web.Response(status=400, headers={"Content-Type": "application/json"})
+
+        # Calculate the expected response size (approximate JSON size)
+        info = PrecomputedChunksInfo(
+            type_="image",
+            data_type=np.dtype("uint8"),
+            num_channels=classifier.num_classes,
+            scales=tuple([
+                PrecomputedChunksScale(
+                    chunk_sizes=tuple([
+                        (ds_result.tile_shape.x, ds_result.tile_shape.y, ds_result.tile_shape.z)
+                    ]),
+                    encoding=RawEncoder(),
+                    key=PurePosixPath("data"),
+                    resolution=ds_result.spatial_resolution,
+                    size=(ds_result.shape.x, ds_result.shape.y, ds_result.shape.z),
+                    voxel_offset=(ds_result.interval.start.x, ds_result.interval.start.y, ds_result.interval.start.z),
+                )
+            ])
+        )
+        
+        # Serialize to get content length
+        import json
+        content = json.dumps(info.to_json_value()).encode('utf-8')
+        
+        return web.Response(
+            status=200,
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(content)),
+                "Cache-Control": "no-store, must-revalidate",
+                "Expires": "0",
+            }
+        )
+
+    async def precomputed_chunks_compute_head(self, request: web.Request) -> web.Response:
+        """HEAD handler for precomputed chunks data - returns same headers as GET but without body"""
+        generation = int(request.match_info.get("generation")) # type: ignore
+        xBegin = int(request.match_info.get("xBegin")) # type: ignore
+        xEnd = int(request.match_info.get("xEnd")) # type: ignore
+        yBegin = int(request.match_info.get("yBegin")) # type: ignore
+        yEnd = int(request.match_info.get("yEnd")) # type: ignore
+        zBegin = int(request.match_info.get("zBegin")) # type: ignore
+        zEnd = int(request.match_info.get("zEnd")) # type: ignore
+
+        ds_result = get_encoded_datasource_from_url(match_info_key="encoded_raw_data", request=request)
+        if isinstance(ds_result, Exception):
+            return web.Response(status=400, headers={"Content-Type": "application/json"})
+
+        with self.lock:
+            classifier = self.pixel_classifier()
+        if classifier is None:
+            return web.Response(status=412, headers={"Content-Type": "application/json"})
+
+        if generation != self._state.generation:
+            return web.Response(status=410, headers={"Content-Type": "application/json"})
+
+        # Calculate expected response size
+        width = xEnd - xBegin
+        height = yEnd - yBegin
+        depth = zEnd - zBegin
+        num_channels = classifier.num_classes
+
+        if "format" in request.query:
+            requested_format = request.query["format"]
+            if requested_format != "png":
+                return web.Response(status=400, headers={"Content-Type": "text/plain"})
+            if depth > 1:
+                return web.Response(status=400, headers={"Content-Type": "text/plain"})
+            
+            # PNG size is variable, but we can provide a reasonable estimate
+            # For prediction images, this is typically much smaller than raw data
+            estimated_png_size = width * height * 3  # Rough estimate for RGB PNG
+            
+            return web.Response(
+                status=200,
+                headers={
+                    "Content-Type": "image/png",
+                    "Content-Length": str(estimated_png_size),
+                    "Cache-Control": "no-store, must-revalidate",
+                    "Expires": "0",
+                }
+            )
+
+        # Raw binary format: width * height * depth * channels * 1 byte (uint8)
+        content_length = width * height * depth * num_channels
+        
+        return web.Response(
+            status=200,
+            headers={
+                "Content-Type": "application/octet-stream", 
+                "Content-Length": str(content_length),
+                "Cache-Control": "no-store, must-revalidate",
+                "Expires": "0",
+            }
+        )

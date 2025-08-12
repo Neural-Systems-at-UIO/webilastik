@@ -159,11 +159,20 @@ class WebIlastik:
                 "/predictions/raw_data={encoded_raw_data}/generation={generation}/data/{xBegin}-{xEnd}_{yBegin}-{yEnd}_{zBegin}-{zEnd}",
                 lambda request: self.workflow.pixel_classifier_applet.precomputed_chunks_compute(request)
             ),
+            web.head(
+                "/predictions/raw_data={encoded_raw_data}/generation={generation}/data/{xBegin}-{xEnd}_{yBegin}-{yEnd}_{zBegin}-{zEnd}",
+                lambda request: self.workflow.pixel_classifier_applet.precomputed_chunks_compute_head(request)
+            ),
             web.get(
                 "/predictions/raw_data={encoded_raw_data}/generation={generation}/info",
                 lambda request: self.workflow.pixel_classifier_applet.predictions_precomputed_chunks_info(request)
             ),
+            web.head(
+                "/predictions/raw_data={encoded_raw_data}/generation={generation}/info",
+                lambda request: self.workflow.pixel_classifier_applet.predictions_precomputed_chunks_info_head(request)
+            ),
             web.post("/download_project_as_ilp", self.download_project_as_ilp),
+            web.head("/download_project_as_ilp", self.download_project_as_ilp_head),
             web.post("/close", self.close_session),
             web.post(
                 "/get_datasources_from_url",
@@ -383,6 +392,18 @@ class WebIlastik:
             body=self.workflow.get_ilp_contents(),
             content_type="application/octet-stream",
             headers={
+                "Content-disposition": 'attachment; filename="MyProject.ilp"'
+            }
+        )
+
+    async def download_project_as_ilp_head(self, request: web.Request):
+        """HEAD handler for project download - returns headers without body"""
+        ilp_contents = self.workflow.get_ilp_contents()
+        return web.Response(
+            status=200,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "Content-Length": str(len(ilp_contents)),
                 "Content-disposition": 'attachment; filename="MyProject.ilp"'
             }
         )

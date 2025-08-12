@@ -41,11 +41,40 @@ addFetchListener('fetch', async (event: FetchEvent) => {
     })
     event.respondWith((async () => {
         const response = await fetch(newRequest)
-        if(url.path.name == "stat" || request.method.toLowerCase() !== "get" || !response.ok){
-            return await response
+        if(url.path.name == "stat" || !response.ok){
+            return response
         }
+        
+        // Handle HEAD requests - they don't have a body to parse
+        if(request.method.toLowerCase() === "head"){
+            // For HEAD requests, we need to get the CSCS URL but make a HEAD request to it
+            // However, CSCS doesn't support HEAD, so we make a GET request and strip the body
+            try {
+                const response_payload = await response.json();
+                const cscsObjectUrl = response_payload["url"];
+                
+                // Make a GET request to CSCS URL but return only headers (simulating HEAD)
+                const cscsResponse = await fetch(cscsObjectUrl, {method: "GET"});
+                
+                // Return response with same headers but no body (HEAD semantics)
+                return new Response(null, {
+                    status: cscsResponse.status,
+                    statusText: cscsResponse.statusText,
+                    headers: cscsResponse.headers
+                });
+            } catch (e) {
+                // If we can't parse the response or fetch CSCS URL, return the original response
+                return response;
+            }
+        }
+        
+        // Only handle GET requests with the redirect logic
+        if(request.method.toLowerCase() !== "get"){
+            return response
+        }
+        
         const response_payload = await response.json();
         const cscsObjectUrl = response_payload["url"]
-        return await fetch(cscsObjectUrl)
+        return await fetch(cscsObjectUrl, {method: "GET"})
     })());
 });
