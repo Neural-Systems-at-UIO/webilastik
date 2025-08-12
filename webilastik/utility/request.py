@@ -67,7 +67,7 @@ def request_size(
     url: Url,
     headers: "Mapping[str, str] | None" = None,
 ) -> "int | ErrRequestCompletedAsFailure | ErrRequestCrashed | ErrBadContentLength":
-    response = request(session=session, method="head", url=url, headers=headers)
+    response = request(session=session, method="get", url=url, headers=headers)
     if isinstance(response, Exception):
         return response
     try:
