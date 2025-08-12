@@ -27,7 +27,7 @@ class ErrBadContentLength(Exception):
 
 def request(
     session: requests.Session,
-    method: Literal["get", "put", "post", "delete", "head"],
+    method: Literal["get", "put", "post", "delete"],
     url: Url,
     data: "bytes | IOBase | None" = None,
     offset: int = 0,
@@ -67,10 +67,27 @@ def request_size(
     url: Url,
     headers: "Mapping[str, str] | None" = None,
 ) -> "int | ErrRequestCompletedAsFailure | ErrRequestCrashed | ErrBadContentLength":
-    response = request(session=session, method="get", url=url, headers=headers)
+    # Use a partial GET request with Range header to get file size without downloading the entire file
+    # This is more efficient than the original HEAD request approach since HEAD is now forbidden
+    response = request(session=session, method="get", url=url, headers=headers, offset=0, num_bytes=1)
     if isinstance(response, Exception):
         return response
     try:
-        return int(response[1]["content-length"])
+        # Try to get content-length from response headers
+        content_length = response[1].get("content-length")
+        if content_length is not None:
+            return int(content_length)
+        
+        # Fallback: try content-range header for partial responses
+        content_range = response[1].get("content-range")
+        if content_range is not None:
+            # Content-Range format: "bytes start-end/total" (e.g., "bytes 0-0/12345")
+            if "/" in content_range:
+                total_size = content_range.split("/")[-1]
+                if total_size.isdigit():
+                    return int(total_size)
+        
+        # If we can't determine size from headers, this is an error
+        return ErrBadContentLength()
     except Exception:
         return ErrBadContentLength()
