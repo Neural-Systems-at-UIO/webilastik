@@ -86,11 +86,11 @@ tasks:
     deps: [create-neuroglancer-git-dir]
     dir: "{{.NEUROGLANCER_GIT_DIR}}"
     vars:
-      COMMIT_HASH: "0edaf528000268daea3dd1d1781e53527642b85d"
+      COMMIT_HASH: "5852f721534a4f7a504ae5c085102f169e4fb517" 
     cmds:
-      - git clone https://github.com/ilastik/neuroglancer . && git fetch
+      - git clone https://github.com/ArdaBalkir/neuroglancer . && git fetch
       - git checkout {{.COMMIT_HASH}}
-    status: # FIXME: this doesn't update the ng repo
+    status:
       - git status > /dev/null 2>&1
       - test "$(git rev-parse HEAD)" = "$(git rev-parse {{.COMMIT_HASH}})"
 
