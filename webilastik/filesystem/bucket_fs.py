@@ -210,10 +210,25 @@ class BucketFs(IFilesystem):
         # Only encode spaces, NOT semicolons (they're part of response-content-disposition syntax)
         fixed_url = raw_url.replace(" ", "%20") if " " in raw_url else raw_url
 
+        # CRITICAL: For presigned URLs (both Swift and S3), we MUST preserve the exact URL string
+        # because the signature is computed over it. Parsing and re-encoding will break the signature.
         out_url = Url.parse(fixed_url)
         if out_url is None:
             return Exception("Could not parse URL from data proxy response")
-        return out_url
+
+        # Create a new Url with preserved raw URL for presigned URLs
+        # This ensures the signature remains valid
+        preserved_url = Url(
+            datascheme=out_url.datascheme,
+            protocol=out_url.protocol,
+            hostname=out_url.hostname,
+            port=out_url.port,
+            path=out_url.path,
+            search=out_url.search,
+            hash_=out_url.hash_,
+            preserve_raw_url=fixed_url,
+        )
+        return preserved_url
 
     def create_file(
         self, *, path: PurePosixPath, contents: bytes

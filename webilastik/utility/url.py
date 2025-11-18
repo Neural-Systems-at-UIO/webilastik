@@ -13,51 +13,47 @@ from webilastik.server.rpc import dto
 DataScheme = Literal["precomputed", "n5", "deepzoom"]
 Protocol = Literal["http", "https", "file", "memory"]
 
+
 class SearchQuotingMethod(enum.Enum):
     QUOTE = 0
     QUOTE_PLUS = 1
+
 
 def parse_params(params: "str | None") -> Dict[str, str]:
     if params is None:
         return {}
     else:
-        parsed_params: Dict[str, List[str]] = parse_qs(params, keep_blank_values=True, strict_parsing=True, encoding='utf-8')
-        return {k: v[-1] if v else "" for k,v in parsed_params.items()}
+        parsed_params: Dict[str, List[str]] = parse_qs(
+            params, keep_blank_values=True, strict_parsing=True, encoding="utf-8"
+        )
+        return {k: v[-1] if v else "" for k, v in parsed_params.items()}
+
 
 class Url:
     datascheme: Optional[DataScheme]
     protocol: Protocol
 
     datascheme_pattern: Final[str] = (
-        "("
-            r"(?P<datascheme>precomputed|n5|deepzoom)" + r"(\+|://)"
-        ")?"
+        "(" r"(?P<datascheme>precomputed|n5|deepzoom)" + r"(\+|://)" ")?"
     )
     hostname_pattern: Final[str] = r"(?P<hostname>[\w\-\.]+)"
-    port_pattern: Final[str] = (
-        "(:"
-            r"(?P<port>\d+)"
-        ")?"
-    )
+    port_pattern: Final[str] = "(:" r"(?P<port>\d+)" ")?"
     path_pattern: Final[str] = r"(?P<path>/[^?#]*)"
-    search_params_pattern: Final[str] = (
-        r"(\?"
-            r"(?P<search>[^#]*)"
-        r")?"
-    )
-    hash_pattern: Final[str] = (
-        r"(#"
-            r"(?P<hash_>.*)"
-        r")?"
-    )
+    search_params_pattern: Final[str] = r"(\?" r"(?P<search>[^#]*)" r")?"
+    hash_pattern: Final[str] = r"(#" r"(?P<hash_>.*)" r")?"
 
     file_url_regex = re.compile(
-        datascheme_pattern + "file://" + path_pattern + hash_pattern,
-        re.IGNORECASE
+        datascheme_pattern + "file://" + path_pattern + hash_pattern, re.IGNORECASE
     )
 
     networked_url_regex = re.compile(
-        datascheme_pattern + r"(?P<protocol>http|https)://" + hostname_pattern + port_pattern + path_pattern + search_params_pattern + hash_pattern,
+        datascheme_pattern
+        + r"(?P<protocol>http|https)://"
+        + hostname_pattern
+        + port_pattern
+        + path_pattern
+        + search_params_pattern
+        + hash_pattern,
         re.IGNORECASE,
     )
 
@@ -67,14 +63,18 @@ class Url:
         if match is None:
             return None
         datascheme = match.group("datascheme")
-        if datascheme != "precomputed" and datascheme != "n5" and datascheme != "deepzoom":
+        if (
+            datascheme != "precomputed"
+            and datascheme != "n5"
+            and datascheme != "deepzoom"
+        ):
             return ValueError(f"unexpected datascheme: {datascheme}")
         return Url(
             datascheme=datascheme,
             protocol="file",
             hostname="",
             path=PurePosixPath(match.group("path")),
-            hash_=match.group("hash_")
+            hash_=match.group("hash_"),
         )
 
     @classmethod
@@ -83,7 +83,12 @@ class Url:
         if match is None:
             return None
         datascheme = match.group("datascheme")
-        if datascheme is not None and datascheme != "precomputed" and datascheme != "n5" and datascheme != "deepzoom":
+        if (
+            datascheme is not None
+            and datascheme != "precomputed"
+            and datascheme != "n5"
+            and datascheme != "deepzoom"
+        ):
             return RuntimeError(f"Bug: unexpected datascheme: {datascheme}")
         protocol = match.group("protocol")
         if protocol != "http" and protocol != "https":
@@ -95,7 +100,7 @@ class Url:
             try:
                 port = int(raw_port)
             except:
-                return None #Fixme: would be better to return an exception
+                return None  # Fixme: would be better to return an exception
         try:
             path = PurePosixPath(match.group("path"))
         except:
@@ -111,7 +116,7 @@ class Url:
             port=port,
             path=path,
             search=search,
-            hash_=match.group("hash_")
+            hash_=match.group("hash_"),
         )
 
     def to_ilp_info_filePath(self) -> str:
@@ -126,7 +131,7 @@ class Url:
         if isinstance(file_url_result, Url):
             return file_url_result
         if isinstance(file_url_result, Exception):
-            return None #FIXME
+            return None  # FIXME
         if file_url_result is not None:
             assert_never(file_url_result)
 
@@ -134,7 +139,7 @@ class Url:
         if isinstance(net_url_result, Url):
             return net_url_result
         if isinstance(net_url_result, Exception):
-            return None #FIXME
+            return None  # FIXME
         if net_url_result is not None:
             assert_never(net_url_result)
         return None
@@ -147,7 +152,7 @@ class Url:
         return parsed
 
     @classmethod
-    def from_dto(cls, url_message: dto.UrlDto) -> 'Url':
+    def from_dto(cls, url_message: dto.UrlDto) -> "Url":
         return Url(
             datascheme=url_message.datascheme,
             protocol=url_message.protocol,
@@ -169,8 +174,8 @@ class Url:
             fragment=self.hash_,
         )
 
-    #FIXME: http:// and file:// URLs are too different to be a single class
-    #FIXME: file:// has no hostname, search or port
+    # FIXME: http:// and file:// URLs are too different to be a single class
+    # FIXME: file:// has no hostname, search or port
     def __init__(
         self,
         *,
@@ -182,12 +187,13 @@ class Url:
         search: Optional[Mapping[str, str]] = None,
         hash_: Optional[str] = None,
         search_quoting_method: SearchQuotingMethod = SearchQuotingMethod.QUOTE_PLUS,
+        preserve_raw_url: Optional[str] = None,
     ):
         path = PurePosixPath("/") / path
         path_parts: List[str] = []
-        for part in  path.as_posix().split("/"):
+        for part in path.as_posix().split("/"):
             if part == "." or part == "":
-                continue;
+                continue
             if part == "..":
                 if len(path_parts) > 0:
                     _ = path_parts.pop()
@@ -202,23 +208,40 @@ class Url:
         self.path = PurePosixPath("/") / "/".join(path_parts)
         self.search = search or {}
         self.hash_ = hash_
-        self.schemeless_raw = f"{protocol}://{self.host if protocol != 'file' else ''}"
-        self.schemeless_raw += str(path)
-        if self.search and protocol != "file":
-            if search_quoting_method == SearchQuotingMethod.QUOTE_PLUS:
-                quote_via = quote_plus
-            else:
-                quote_via = quote
-            self.schemeless_raw += "?" + urlencode(self.search, doseq=True, quote_via=quote_via)
-        if self.hash_:
-            self.schemeless_raw += "#" + self.hash_
 
-        if self.datascheme:
-            self.raw = f"{self.datascheme}+{self.schemeless_raw}"
-            self.double_protocol_raw = f"{self.datascheme}://{self.schemeless_raw}"
+        # If preserve_raw_url is provided (for presigned URLs), use it directly
+        # This is critical for presigned URLs where the signature is computed over the exact URL string
+        if preserve_raw_url is not None:
+            self.schemeless_raw = preserve_raw_url
+            if self.datascheme:
+                self.raw = f"{self.datascheme}+{self.schemeless_raw}"
+                self.double_protocol_raw = f"{self.datascheme}://{self.schemeless_raw}"
+            else:
+                self.raw = self.schemeless_raw
+                self.double_protocol_raw = self.raw
         else:
-            self.raw = self.schemeless_raw
-            self.double_protocol_raw = self.raw
+            # Normal URL construction with encoding
+            self.schemeless_raw = (
+                f"{protocol}://{self.host if protocol != 'file' else ''}"
+            )
+            self.schemeless_raw += str(path)
+            if self.search and protocol != "file":
+                if search_quoting_method == SearchQuotingMethod.QUOTE_PLUS:
+                    quote_via = quote_plus
+                else:
+                    quote_via = quote
+                self.schemeless_raw += "?" + urlencode(
+                    self.search, doseq=True, quote_via=quote_via
+                )
+            if self.hash_:
+                self.schemeless_raw += "#" + self.hash_
+
+            if self.datascheme:
+                self.raw = f"{self.datascheme}+{self.schemeless_raw}"
+                self.double_protocol_raw = f"{self.datascheme}://{self.schemeless_raw}"
+            else:
+                self.raw = self.schemeless_raw
+                self.double_protocol_raw = self.raw
 
         if hostname == "" and protocol != "file" and protocol != "memory":
             raise ValueError(f"Missing hostname in {self.raw}")
@@ -260,7 +283,7 @@ class Url:
             hostname=hostname or self.hostname,
             port=port or self.port,
             search={**new_search, **(extra_search or {})},
-            hash_=new_hash
+            hash_=new_hash,
         )
 
     def schemeless(self) -> "Url":
@@ -305,15 +328,17 @@ class Url:
 
     def ensure_datascheme(self, datascheme: DataScheme) -> "Url":
         if self.datascheme != datascheme:
-            raise ValueError(f"Url {self.raw} had unexpected datascheme: {self.datascheme}. Expected {datascheme}")
+            raise ValueError(
+                f"Url {self.raw} had unexpected datascheme: {self.datascheme}. Expected {datascheme}"
+            )
         return self
 
     def to_base64(self) -> str:
-        return b64encode(self.raw.encode("utf8"), altchars=b'-_').decode("utf8")
+        return b64encode(self.raw.encode("utf8"), altchars=b"-_").decode("utf8")
 
     @staticmethod
     def from_base64(encoded_url: str) -> "Url":
-        decoded_raw_url = b64decode(encoded_url, altchars=b'-_').decode('utf8')
+        decoded_raw_url = b64decode(encoded_url, altchars=b"-_").decode("utf8")
         url = Url.parse(decoded_raw_url)
         assert url is not None
         return url
