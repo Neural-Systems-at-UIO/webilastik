@@ -209,6 +209,8 @@ class BucketFs(IFilesystem):
         # Fix for S3 presigned URLs: encode spaces in query params (was fine with old Swift URLs)
         # Only encode spaces, NOT semicolons (they're part of response-content-disposition syntax)
         fixed_url = raw_url.replace(" ", "%20") if " " in raw_url else raw_url
+        # Also encode + as %2B, because requests won't do it, and S3 will interpret + as space
+        fixed_url = fixed_url.replace("+", "%2B")
 
         # CRITICAL: For presigned URLs (both Swift and S3), we MUST preserve the exact URL string
         # because the signature is computed over it. Parsing and re-encoding will break the signature.
