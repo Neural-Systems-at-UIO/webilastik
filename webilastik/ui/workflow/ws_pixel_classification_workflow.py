@@ -159,20 +159,13 @@ class WebIlastik:
                 "/predictions/raw_data={encoded_raw_data}/generation={generation}/data/{xBegin}-{xEnd}_{yBegin}-{yEnd}_{zBegin}-{zEnd}",
                 lambda request: self.workflow.pixel_classifier_applet.precomputed_chunks_compute(request)
             ),
-            web.head(
-                "/predictions/raw_data={encoded_raw_data}/generation={generation}/data/{xBegin}-{xEnd}_{yBegin}-{yEnd}_{zBegin}-{zEnd}",
-                lambda request: self.workflow.pixel_classifier_applet.precomputed_chunks_compute_head(request)
-            ),
+            # Note: HEAD routes removed due to aiohttp version compatibility issues
+            # aiohttp automatically handles HEAD for GET routes
             web.get(
                 "/predictions/raw_data={encoded_raw_data}/generation={generation}/info",
                 lambda request: self.workflow.pixel_classifier_applet.predictions_precomputed_chunks_info(request)
             ),
-            web.head(
-                "/predictions/raw_data={encoded_raw_data}/generation={generation}/info",
-                lambda request: self.workflow.pixel_classifier_applet.predictions_precomputed_chunks_info_head(request)
-            ),
             web.post("/download_project_as_ilp", self.download_project_as_ilp),
-            web.head("/download_project_as_ilp", self.download_project_as_ilp_head),
             web.post("/close", self.close_session),
             web.post(
                 "/get_datasources_from_url",
