@@ -566,7 +566,7 @@ class LocalJobLauncher(SshJobLauncher):
             export PYTHONPATH
             export REDIS_UNIX_SOCKET_PATH="{redis_unix_socket_path}"
 
-            {conda_env_dir / "bin/mpiexec -n 4" if self.executor_getter == "dask" else ""} "{conda_env_dir}/bin/python" {webilastik_source_dir}/webilastik/ui/workflow/ws_pixel_classification_workflow.py
+            {conda_env_dir / "bin/mpiexec -n 4" if self.executor_getter == "dask" else ""} "{conda_env_dir}/bin/python" {webilastik_source_dir}/webilastik/ui/workflow/ws_pixel_classification_workflow.py > {working_dir}/session.log 2>&1
 
             kill -2 $(cat {redis_pid_file})
             sleep 2

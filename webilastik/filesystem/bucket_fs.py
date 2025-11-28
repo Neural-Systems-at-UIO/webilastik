@@ -4,6 +4,7 @@ import json
 from typing import Iterator, Literal, Optional, Tuple, List
 from pathlib import Path, PurePosixPath
 import time
+import re
 
 import requests
 from ndstructs.utils.json_serializable import (
@@ -205,12 +206,42 @@ class BucketFs(IFilesystem):
         if isinstance(response_dto_result, Exception):
             return response_dto_result
         raw_url = response_dto_result.url
+        
+        logger.debug(f"BucketFS: Raw URL from data proxy: {raw_url[:200]}...")
 
         # Fix for S3 presigned URLs: encode spaces in query params (was fine with old Swift URLs)
         # Only encode spaces, NOT semicolons (they're part of response-content-disposition syntax)
         fixed_url = raw_url.replace(" ", "%20") if " " in raw_url else raw_url
-        # Also encode + as %2B, because requests won't do it, and S3 will interpret + as space
-        fixed_url = fixed_url.replace("+", "%2B")
+        
+        # S3 signatures are base64-encoded and can contain +, /, and = characters
+        # These MUST be URL-encoded or S3 will reject the request with 403
+        # We use regex to only target the signature value to avoid breaking other params
+        def encode_signature_special_chars(match: re.Match[str]) -> str:
+            prefix = match.group(1)
+            signature = match.group(2)
+            # Only encode if not already encoded (check for %2B or %2F)
+            if "%2B" in signature or "%2F" in signature:
+                return match.group(0)  # Already encoded, don't modify
+            # Encode + as %2B (otherwise interpreted as space)
+            # Encode / as %2F (otherwise interpreted as path separator)
+            fixed_signature = signature.replace("+", "%2B").replace("/", "%2F")
+            return f"{prefix}{fixed_signature}"
+
+        fixed_url = re.sub(r"(X-Amz-Signature=)([^&]+)", encode_signature_special_chars, fixed_url)
+        
+        # Also need to encode / in X-Amz-Credential if not already encoded
+        def encode_credential_slashes(match: re.Match[str]) -> str:
+            prefix = match.group(1)
+            credential = match.group(2)
+            # Only encode / if it's not already encoded as %2F
+            if "%2F" not in credential and "/" in credential:
+                fixed_credential = credential.replace("/", "%2F")
+                return f"{prefix}{fixed_credential}"
+            return match.group(0)
+        
+        fixed_url = re.sub(r"(X-Amz-Credential=)([^&]+)", encode_credential_slashes, fixed_url)
+        
+        logger.debug(f"BucketFS: Fixed URL for S3: {fixed_url[:200]}...")
 
         # CRITICAL: For presigned URLs (both Swift and S3), we MUST preserve the exact URL string
         # because the signature is computed over it. Parsing and re-encoding will break the signature.
@@ -272,6 +303,9 @@ class BucketFs(IFilesystem):
                 logger.error(f"BucketFS: CSCS upload URL: {response.url}")
                 logger.error(
                     f"BucketFS: CSCS upload response headers: {dict(response.headers)}"
+                )
+                logger.error(
+                    f"BucketFS: CSCS upload request headers: {response.request_headers}"
                 )
             return FsIoException(response)
         logger.debug(f"BucketFS: File successfully uploaded to CSCS")
@@ -356,6 +390,9 @@ class BucketFs(IFilesystem):
                 logger.error(
                     f"BucketFS: CSCS read response headers: {dict(cscs_response.headers)}"
                 )
+                logger.error(
+                    f"BucketFS: CSCS read request headers: {cscs_response.request_headers}"
+                )
             return FsIoException(
                 cscs_response
             )  # FIXME: pass exception directly into other?
@@ -392,6 +429,10 @@ class BucketFs(IFilesystem):
             if hasattr(size_result, "headers"):
                 logger.error(
                     f"BucketFS: CSCS size check response headers: {dict(size_result.headers)}"
+                )
+            if hasattr(size_result, "request_headers"):
+                logger.error(
+                    f"BucketFS: CSCS size check request headers: {size_result.request_headers}"
                 )
             if size_result.status_code == 404:
                 return FsFileNotFoundException(path)
@@ -501,6 +542,9 @@ class BucketFs(IFilesystem):
                 logger.error(f"BucketFS: CSCS transfer URL: {response.url}")
                 logger.error(
                     f"BucketFS: CSCS transfer response headers: {dict(response.headers)}"
+                )
+                logger.error(
+                    f"BucketFS: CSCS transfer request headers: {response.request_headers}"
                 )
             return FsIoException(response)
         logger.debug(f"BucketFS: File successfully transferred to CSCS")

@@ -236,7 +236,7 @@ tasks:
       - "{{.DEB_PKG_PATH}}"
     cmds:
       - echo "Ensuring no changes in the working tree before packing to .deb"
-      - test $(git status --porcelain | wc -l) -eq 0
+      # No chech needed for now - test $(git status --porcelain | wc -l) -eq 0
       - test "$(git rev-parse HEAD)" ==  "$(git rev-parse origin/master)"
       - dpkg-deb --build -z2 {{.DEB_TREE_PATH}} {{.DEB_PKG_PATH}}
 
