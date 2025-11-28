@@ -87,12 +87,8 @@ def request_size(
     if isinstance(response, Exception):
         return response
     try:
-        # Try to get content-length from response headers
-        content_length = response[1].get("content-length")
-        if content_length is not None:
-            return int(content_length)
-        
-        # Fallback: try content-range header for partial responses
+        # For partial responses (206), content-range has the total size
+        # Check content-range FIRST because content-length will be the chunk size (1), not total
         content_range = response[1].get("content-range")
         if content_range is not None:
             # Content-Range format: "bytes start-end/total" (e.g., "bytes 0-0/12345")
@@ -100,6 +96,11 @@ def request_size(
                 total_size = content_range.split("/")[-1]
                 if total_size.isdigit():
                     return int(total_size)
+        
+        # Fallback: try content-length (only valid for non-partial responses)
+        content_length = response[1].get("content-length")
+        if content_length is not None:
+            return int(content_length)
         
         # If we can't determine size from headers, this is an error
         return ErrBadContentLength()
