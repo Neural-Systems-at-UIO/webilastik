@@ -19,5 +19,5 @@ import { Url } from "../util/parsed_url";
         injectCss(Url.parse(cssUrl.toString()))
     }
 
-    new EulaPopup()
+    // new EulaPopup()
 }

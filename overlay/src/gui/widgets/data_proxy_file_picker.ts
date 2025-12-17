@@ -43,8 +43,8 @@ export class DataProxyFilePicker{
                 new ErrorPopupWidget({message: "Please enter a bucket name and a path into the bucket"})
                 return
             }
-
-            const popup = new PopupWidget(`Browsing bucket ${bucketName}`)
+            // `Browsing bucket ${bucketName}`
+            const popup = new PopupWidget(`Select training images`)
             const fs = new BucketFs({bucket_name: bucketName});
             const fsTreeWidget = new LiveFsTree({
                 fs,

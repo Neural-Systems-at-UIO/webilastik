@@ -61,7 +61,7 @@ export class DataSourceInput{
             return
         }
         if(datasources_result === undefined){
-            new ErrorPopupWidget({message: `No datasources fond with given URL: ${url}`})
+            new ErrorPopupWidget({message: `No datasources found with given URL: ${url}`})
             return
         }
         this.popupSuggestions(datasources_result)

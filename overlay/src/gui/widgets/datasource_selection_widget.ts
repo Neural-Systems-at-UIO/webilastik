@@ -107,7 +107,7 @@ export class DataSourceSelectionWidget{
         this.defaultBucketPath = params.defaultBucketPath
 
         new Paragraph({parentElement: this.element, children: [
-            new ButtonWidget({contents: "🪣 Open from Data Proxy", parentElement: undefined, onClick: () => {
+            new ButtonWidget({contents: "🪣 Open", parentElement: undefined, onClick: () => {
                 const popup = PopupWidget.ClosablePopup({title: "Select datasets from Data Proxy"})
                 const filePicker = new DataProxyFilePicker({
                     parentElement: popup.contents,
@@ -129,7 +129,8 @@ export class DataSourceSelectionWidget{
                     },
                     okButtonValue: "Open",
                 })
-            }}),
+            }})
+            /*,
             new ButtonWidget({contents: "🔗 Enter URL", parentElement: undefined, onClick: () => {
                 const popup = PopupWidget.ClosablePopup({title: "Enter dataset URL"})
                 let urlInput: UrlInput;
@@ -155,7 +156,7 @@ export class DataSourceSelectionWidget{
                         }),
                     })
                 })
-            }}),
+            }}),*/
         ]})
 
         this.lanesContainer = new Div({parentElement: this.element})
@@ -189,14 +190,21 @@ export class DataSourceSelectionWidget{
         if(scales.length == 1){
             return scales
         }
+        // take top 5
+        const sortedScales = [...scales].sort((a, b) => {
+            return a.spatial_resolution[0] - b.spatial_resolution[0]
+        }).slice(0, 5)
+
         return PopupWidget.WaitPopup({
-            title: "Select resolutions to open",
+            title: `Select the image resolution to use for training`,
             withSpinner: false,
             operation: (popup: PopupWidget) => new Promise<FsDataSource[]>(resolve => {
 
+                // auto use all selected resolution
+
                 let datasourcesSelect = new MultiSelect<FsDataSource>({
                     parentElement: popup.contents,
-                    options: scales,
+                    options: sortedScales,
                     renderer: (ds) => new Span({parentElement: undefined, innerText: ds.getDisplayString()}),
                 })
                 new ButtonWidget({parentElement: popup.contents, contents: "Open Selected", onClick: () => resolve(datasourcesSelect.value)})
