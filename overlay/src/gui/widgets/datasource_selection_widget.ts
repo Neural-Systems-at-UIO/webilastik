@@ -8,7 +8,7 @@ import { Viewer } from "../../viewer/viewer";
 import { CssClasses } from "../css_classes";
 import { CollapsableWidget } from "./collapsable_applet_gui";
 import { DataProxyFilePicker } from "./data_proxy_file_picker";
-import { ButtonWidget, MultiSelect } from "./input_widget";
+import { ButtonWidget } from "./input_widget";
 import { LiveFsTree } from "./live_fs_tree";
 import { PopupWidget } from "./popup";
 import { UrlInput } from "./value_input_widget";
@@ -190,27 +190,13 @@ export class DataSourceSelectionWidget{
         if(scales.length == 1){
             return scales
         }
-        // take top 5
+        // take top 5 sorted by resolution (smallest first) and auto-select them
         const sortedScales = [...scales].sort((a, b) => {
             return a.spatial_resolution[0] - b.spatial_resolution[0]
         }).slice(0, 5)
 
-        return PopupWidget.WaitPopup({
-            title: `Select the image resolution to use for training`,
-            withSpinner: false,
-            operation: (popup: PopupWidget) => new Promise<FsDataSource[]>(resolve => {
-
-                // auto use all selected resolution
-
-                let datasourcesSelect = new MultiSelect<FsDataSource>({
-                    parentElement: popup.contents,
-                    options: sortedScales,
-                    renderer: (ds) => new Span({parentElement: undefined, innerText: ds.getDisplayString()}),
-                })
-                new ButtonWidget({parentElement: popup.contents, contents: "Open Selected", onClick: () => resolve(datasourcesSelect.value)})
-                new ButtonWidget({parentElement: popup.contents, contents: "Skip", onClick: () => resolve([])})
-            })
-        })
+        // Auto-select all sorted scales without prompting
+        return sortedScales
     }
 
     public static async tryResolveDataSources(

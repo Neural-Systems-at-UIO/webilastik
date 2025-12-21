@@ -1228,14 +1228,10 @@ export class DziLevelDataSource extends FsDataSource{
     }
 
     public getDisplayString(): string {
-        let name = this.url.path.name
-        for(let comp of this.url.path.components){
-            if(comp.toLowerCase().endsWith(".dzip")){
-                name = comp
-                break
-            }
-        }
-        return `${name} ${this.resolutionString}`
+        // Display as h x w (percentage%)
+        const height = this.interval.shape.y
+        const width = this.interval.shape.x
+        return `${height} x ${width} (${this.resolutionString})`
     }
 
     public get resolutionString(): string {

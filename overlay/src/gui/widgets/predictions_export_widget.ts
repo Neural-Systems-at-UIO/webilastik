@@ -14,6 +14,7 @@ import {
     JobIsPendingDto,
     JobIsRunningDto,
     LabelHeaderDto,
+    ListFsDirRequest,
     OpenDatasinkJobDto,
     PixelClassificationExportAppletStateDto,
     StartPixelProbabilitiesExportJobParamsDto,
@@ -234,11 +235,12 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
         ])})
 
         const datasourceFieldset = createFieldset({parentElement: this.element, legend: "Input Datasets:"})
-        // fill this with the zippedimages directory
-        // the same resolution for training images
         this.datasourceListWidget = new DataSourceListWidget({
             parentElement: datasourceFieldset, session: this.session, defaultBucketName, defaultBucketPath: inputBucketPath
         })
+
+        // Auto-load datasources from the inputBucketPath (zipped_images directory)
+        this.autoLoadDatasources({bucketName: defaultBucketName, bucketPath: inputBucketPath})
 
         const datasinkFieldset = createFieldset({legend: "Output: ", parentElement: this.element})
         const fileLocationInputWidget = new FileLocationPatternInputWidget({
@@ -424,6 +426,42 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
         ]})
 
         this.jobsDisplay = new Div({parentElement: this.element});
+    }
+
+    private async autoLoadDatasources(params: {bucketName: string, bucketPath: Path}){
+        const fs = new BucketFs({bucket_name: params.bucketName})
+
+        // List files in the bucket path
+        const listResult = await this.session.listFsDir(new ListFsDirRequest({
+            fs: fs.toDto(),
+            path: params.bucketPath.raw
+        }))
+
+        if(listResult instanceof Error){
+            console.warn(`Could not auto-load datasources from ${params.bucketPath.raw}: ${listResult.message}`)
+            return
+        }
+
+        // Get URLs for all files in the directory
+        const fileUrls = listResult.files.map(filePath => fs.getUrl(Path.parse(filePath)))
+
+        if(fileUrls.length === 0){
+            return
+        }
+
+        // Resolve datasources from URLs (uses the same resolution auto-selection as training)
+        const datasourcesMap = await DataSourceSelectionWidget.tryResolveDataSources({
+            urls: fileUrls,
+            session: this.session
+        })
+
+        // Add resolved datasources to the list widget
+        for(const [_url, results] of datasourcesMap.entries()){
+            if(results instanceof Error){
+                continue
+            }
+            results.forEach(ds => this.datasourceListWidget.listWidget.push(ds))
+        }
     }
 
     protected onNewState(new_state: PixelClassificationExportAppletState){
