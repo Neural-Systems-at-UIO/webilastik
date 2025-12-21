@@ -11,8 +11,7 @@ import { DataProxyFilePicker } from "./data_proxy_file_picker";
 import { ButtonWidget } from "./input_widget";
 import { LiveFsTree } from "./live_fs_tree";
 import { PopupWidget } from "./popup";
-import { UrlInput } from "./value_input_widget";
-import { Anchor, Div, Form, Li, Paragraph, Span, Ul } from "./widget";
+import { Anchor, Div, Li, Paragraph, Span, Ul } from "./widget";
 
 type ChoiceTransition = {
     nextState: AutoChooseScaleState,
