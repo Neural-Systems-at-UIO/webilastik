@@ -1228,7 +1228,18 @@ export class DziLevelDataSource extends FsDataSource{
     }
 
     public getDisplayString(): string {
-        // Display as h x w (percentage%)
+        let name = this.url.path.name
+        for(let comp of this.url.path.components){
+            if(comp.toLowerCase().endsWith(".dzip")){
+                name = comp
+                break
+            }
+        }
+        return `${name} ${this.resolutionString}`
+    }
+
+    public getSelectionDisplayString(): string {
+        // Display as h x w (percentage%) for selection popup
         const height = this.interval.shape.y
         const width = this.interval.shape.x
         return `${height} x ${width} (${this.resolutionString})`
