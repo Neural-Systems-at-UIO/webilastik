@@ -1,6 +1,6 @@
 # pyright: strict
 
-# Automatically generated via /workspaces/webilastik-devironment/webilastik/webilastik/server/rpc/__main__.py.
+# Automatically generated via /workspaces/ubuntu/webilastik/webilastik/server/rpc/__main__.py.
 # Edit the template file instead of this one!
 
 import json

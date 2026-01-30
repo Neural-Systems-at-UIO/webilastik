@@ -235,8 +235,6 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
         ])})
 
         const datasourceFieldset = createFieldset({parentElement: this.element, legend: "Input Datasets:"})
-        // fill this with the zippedimages directory
-        // the same resolution for training images
         this.datasourceListWidget = new DataSourceListWidget({
             parentElement: datasourceFieldset, session: this.session, defaultBucketName, defaultBucketPath: inputBucketPath
         })

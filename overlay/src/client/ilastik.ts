@@ -1238,6 +1238,13 @@ export class DziLevelDataSource extends FsDataSource{
         return `${name} ${this.resolutionString}`
     }
 
+    public getSelectionDisplayString(): string {
+        // Display as h x w (percentage%) for selection popup
+        const height = this.interval.shape.y
+        const width = this.interval.shape.x
+        return `${height} x ${width} (${this.resolutionString})`
+    }
+
     public get resolutionString(): string {
         return `${(this.scale * 100).toFixed(2)}%`
     }

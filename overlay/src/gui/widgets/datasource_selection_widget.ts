@@ -11,8 +11,7 @@ import { DataProxyFilePicker } from "./data_proxy_file_picker";
 import { ButtonWidget, MultiSelect } from "./input_widget";
 import { LiveFsTree } from "./live_fs_tree";
 import { PopupWidget } from "./popup";
-import { UrlInput } from "./value_input_widget";
-import { Anchor, Div, Form, Li, Paragraph, Span, Ul } from "./widget";
+import { Anchor, Div, Li, Paragraph, Span, Ul } from "./widget";
 
 type ChoiceTransition = {
     nextState: AutoChooseScaleState,
@@ -190,22 +189,24 @@ export class DataSourceSelectionWidget{
         if(scales.length == 1){
             return scales
         }
-        // take top 5
+        // sort by spatial_resolution descending (highest = highest quality like 100%, 50%, 25%)
+        // then take first 5
         const sortedScales = [...scales].sort((a, b) => {
-            return a.spatial_resolution[0] - b.spatial_resolution[0]
-        }).slice(0, 5)
+            return b.spatial_resolution[0] - a.spatial_resolution[0]
+        }).reverse().slice(0, 5)
 
         return PopupWidget.WaitPopup({
             title: `Select the image resolution to use for training`,
             withSpinner: false,
             operation: (popup: PopupWidget) => new Promise<FsDataSource[]>(resolve => {
 
-                // auto use all selected resolution
-
                 let datasourcesSelect = new MultiSelect<FsDataSource>({
                     parentElement: popup.contents,
                     options: sortedScales,
-                    renderer: (ds) => new Span({parentElement: undefined, innerText: ds.getDisplayString()}),
+                    renderer: (ds) => new Span({
+                        parentElement: undefined,
+                        innerText: ds instanceof DziLevelDataSource ? ds.getSelectionDisplayString() : ds.getDisplayString()
+                    }),
                 })
                 new ButtonWidget({parentElement: popup.contents, contents: "Open Selected", onClick: () => resolve(datasourcesSelect.value)})
                 new ButtonWidget({parentElement: popup.contents, contents: "Skip", onClick: () => resolve([])})

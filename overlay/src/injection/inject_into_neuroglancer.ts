@@ -1,5 +1,4 @@
 import { NeuroglancerDriver, OverlayControls } from "..";
-import { EulaPopup } from "../gui/widgets/eula_popup";
 import { injectCss } from "../util/misc";
 import { Url } from "../util/parsed_url";
 
