@@ -198,6 +198,7 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
     private datasourceListWidget: DataSourceListWidget;
     private customTileShapeCheckbox: BooleanInput;
     private tileShapeInput: Shape5DInputNoChannel
+    private runOnClusterCheckbox: BooleanInput;
     private exportModeSelector: TabsWidget<"pixel probabilities" | "simple segmentation", Paragraph>;
     private startExportsButton: Button<"button">;
     private startExportButtonStatusText: Label;
@@ -268,6 +269,11 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
         tileShapeP.show(this.customTileShapeCheckbox.value)
         this.tileShapeInput = new Shape5DInputNoChannel({parentElement: tileShapeP.element, disabled: !this.customTileShapeCheckbox.value})
 
+
+        new Paragraph({parentElement: this.element, cssClasses: [CssClasses.ItkInputParagraph], children: [
+            new Label({parentElement: undefined, innerText: "Run on cluster: "}),
+            this.runOnClusterCheckbox = new BooleanInput({parentElement: undefined, value: false}),
+        ]})
 
         new Paragraph({parentElement: this.element, cssClasses: [CssClasses.ItkInputParagraph], children: [
             this.startExportsButton = new Button({parentElement: undefined, inputType: "button", text: "Start Export Jobs", onClick: async () => {
@@ -407,13 +413,16 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
                 const jobsSubmissionResult = await PopupWidget.WaitPopup({
                     title: "Submitting jobs...",
                     operation: this.session.doHttpRpc(
-                        jobSubmissionPayloads.map(payload => ({
-                            applet_name: this.name,
-                            method_name: payload instanceof StartPixelProbabilitiesExportJobParamsDto ?
-                                "launch_pixel_probabilities_export_job" :
-                                "launch_simple_segmentation_export_job",
-                            arguments: payload,
-                        }))
+                        jobSubmissionPayloads.map(payload => {
+                            const runOnCluster = this.runOnClusterCheckbox.value;
+                            return {
+                                applet_name: this.name,
+                                method_name: payload instanceof StartPixelProbabilitiesExportJobParamsDto ?
+                                    (runOnCluster ? "launch_pixel_probabilities_export_job_on_cluster" : "launch_pixel_probabilities_export_job") :
+                                    (runOnCluster ? "launch_simple_segmentation_export_job_on_cluster" : "launch_simple_segmentation_export_job"),
+                                arguments: payload,
+                            };
+                        })
                     )
                 })
                 if(jobsSubmissionResult instanceof Error){

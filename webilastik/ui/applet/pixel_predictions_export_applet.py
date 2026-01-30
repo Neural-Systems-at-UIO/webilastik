@@ -35,6 +35,12 @@ from webilastik.ui.applet.export_jobs import CreateDziPyramid, DownscaleDatasour
 from webilastik.ui.applet.ws_applet import WsApplet
 from webilastik.ui.usage_error import UsageError
 from webilastik.ui.applet.brushing_applet import Label
+from cryptography.fernet import Fernet
+import asyncio
+import json
+import tempfile
+import textwrap
+from pathlib import Path
 
 _OK = TypeVar("_OK")
 _ERR = TypeVar("_ERR", bound=Exception)
@@ -294,6 +300,156 @@ class PixelClassificationExportApplet(StatelesApplet):
         )
 
 
+    def launch_pixel_probabilities_export_job_on_cluster(self, *, datasource: DataSource, datasink: DataSink) -> "UsageError | None":
+        classifier = self._in_operator()
+        if classifier is None:
+            return UsageError("Upstream not ready yet")
+        expected_shape = datasource.shape.updated(c=classifier.num_classes)
+        if datasink.shape != expected_shape:
+            return UsageError(f"Bad sink shape. Expected {expected_shape} but got {datasink.shape}")
+        if datasink.dtype != np.dtype("float32"):
+            return UsageError("Data sink should have dtype of float32 for this kind of export")
+        if isinstance(datasink, FsDataSink) and isinstance(datasink.filesystem, ZipFs):
+            return UsageError("Exporting pixel probabilities to Zip archives is not supported yet")
+
+        # Submit to cluster
+        asyncio.create_task(self._submit_export_to_cluster(
+            job_name="Pixel Probabilities Export",
+            datasource=datasource,
+            datasink=datasink,
+            export_type="pixel_probabilities",
+            classifier=classifier,
+        ))
+        return None
+
+    def launch_simple_segmentation_export_job_on_cluster(
+        self, *, datasource: DataSource, datasink: DataSink, label_name: str,
+    ) -> "UsageError | None":
+        with self._lock:
+            label_name_indices: Dict[str, int] = {label.name: idx for idx, label in enumerate(self._in_populated_labels() or [])}
+            classifier = self._in_operator()
+        if label_name not in label_name_indices:
+            return UsageError(f"Bad label name: {label_name}")
+        if classifier is None:
+            return UsageError("Applets upstream are not ready yet")
+        if not classifier.is_applicable_to(datasource):
+            return UsageError(f"Classifier is not compatible with provided datasource: {datasource}")
+        expected_shape = datasource.shape.updated(c=3)
+        if datasink.shape != expected_shape:
+            return UsageError(f"Data sink shape {datasink.shape} does not meet expectations: {expected_shape}")
+        if datasink.dtype != np.dtype("uint8"):
+            return UsageError("Data sink should have dtype of 'uint8' for this kind of export")
+
+        # Submit to cluster
+        asyncio.create_task(self._submit_export_to_cluster(
+            job_name="Simple Segmentation Export",
+            datasource=datasource,
+            datasink=datasink,
+            export_type="simple_segmentation",
+            classifier=classifier,
+            label_index=label_name_indices[label_name],
+        ))
+        return None
+
+    async def _submit_export_to_cluster(
+        self,
+        *,
+        job_name: str,
+        datasource: DataSource,
+        datasink: DataSink,
+        export_type: str,
+        classifier: VigraPixelClassifier,
+        label_index: int = None,
+    ):
+        # Create job spec
+        job_spec = {
+            "datasource": datasource.to_dto().to_json_value(),
+            "datasink": datasink.to_dto().to_json_value(),
+        }
+
+        if export_type == "pixel_probabilities":
+            job_spec["pixel_probabilities"] = {
+                "classifier": classifier.to_dto().to_json_value(),
+            }
+        elif export_type == "simple_segmentation":
+            job_spec["simple_segmentation"] = {
+                "classifier": classifier.to_dto().to_json_value(),
+                "label_index": label_index,
+            }
+
+        # Write job spec to temp file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(job_spec, f)
+            job_spec_path = f.name
+
+        # Create sbatch script
+        sbatch_script = self._create_export_sbatch_script(job_name, job_spec_path)
+
+        # Submit to cluster
+        # FIXME: Use proper fernet from session allocator config
+        dummy_fernet = Fernet(Fernet.generate_key())
+        launcher = JusufSshJobLauncher(fernet=dummy_fernet)
+        result = await launcher.submit_sbatch_script(
+            job_name=f"webilastik-export-{job_name.lower().replace(' ', '-')}",
+            max_duration_minutes=Minutes(60),  # FIXME: make configurable
+            sbatch_script=sbatch_script,
+        )
+
+        if isinstance(result, Exception):
+            print(f"Failed to submit export job to cluster: {result}")
+            return
+
+        # Create a dummy job to track the cluster job
+        from webilastik.scheduling.job import SimpleJob
+        dummy_job = SimpleJob(
+            name=f"Cluster: {job_name}",
+            target=lambda: None,  # No actual work, just tracking
+        )
+        dummy_job._status = type(dummy_job._status)(num_completed_steps=0, num_dispatched_steps=1)  # Mark as running
+        dummy_job.uuid = result.compute_session_id  # Use the SLURM job ID as UUID
+
+        with self._lock:
+            self._jobs[dummy_job.uuid] = dummy_job
+        self.on_async_change()
+
+    def _create_export_sbatch_script(self, job_name: str, job_spec_path: str) -> str:
+        # Create a proper sbatch script similar to JusufSshJobLauncher
+        working_dir = f"$SCRATCH/webilastik_export_{job_name.lower().replace(' ', '_')}"
+        conda_env_dir = f"$HOME/miniconda3/envs/webilastik"  # FIXME: make configurable
+
+        out = textwrap.dedent(f"""
+            #!/bin/bash -l
+            #SBATCH --nodes=1
+            #SBATCH --ntasks=1
+            #SBATCH --partition=batch
+            #SBATCH --hint=nomultithread
+
+            set -xeu
+            set -o pipefail
+
+            # Set up environment
+            module load Stages/2025  # FIXME: make configurable
+            module load GCC
+            module load OpenMPI
+
+            mkdir -p {working_dir}
+            cd {working_dir}
+
+            # Copy job spec to working directory
+            cp {job_spec_path} ./job_spec.json
+
+            # Set up Python environment
+            export PYTHONPATH="$HOME/webilastik:$PYTHONPATH"  # FIXME: proper paths
+
+            # Run the export worker
+            {conda_env_dir}/bin/python -m webilastik.ui.applet.export_worker --job_spec ./job_spec.json
+
+            # Clean up
+            rm -rf {working_dir}
+        """)
+        return out
+
+
 class WsPixelClassificationExportApplet(WsApplet, PixelClassificationExportApplet):
     def run_rpc(self, *, user_prompt: UserPrompt, method_name: str, arguments: JsonObject) -> "UsageError | None":
         if method_name == "launch_pixel_probabilities_export_job":
@@ -321,6 +477,32 @@ class WsPixelClassificationExportApplet(WsApplet, PixelClassificationExportApple
                 return UsageError(str(datasink_result)) #FIXME: may not be an usage error
 
             rpc_result = self.launch_simple_segmentation_export_job(datasource=datasource_result, datasink=datasink_result, label_name=params_result.label_header.name)
+        elif method_name == "launch_pixel_probabilities_export_job_on_cluster":
+            params_result = StartPixelProbabilitiesExportJobParamsDto.from_json_value(arguments)
+            if isinstance(params_result, MessageParsingError):
+                return UsageError(str(params_result))
+            datasource_result = FsDataSource.try_from_message(params_result.datasource)
+            if isinstance(datasource_result, Exception):
+                return UsageError(str(datasource_result))
+            datasink_result = DataSink.create_from_message(params_result.datasink)
+            if isinstance(datasink_result, Exception):
+                return UsageError(str(datasink_result))
+            rpc_result = self.launch_pixel_probabilities_export_job_on_cluster(
+                datasource=datasource_result, datasink=datasink_result
+            )
+        elif method_name == "launch_simple_segmentation_export_job_on_cluster":
+            params_result = StartSimpleSegmentationExportJobParamsDto.from_json_value(arguments)
+            if isinstance(params_result, MessageParsingError):
+                return UsageError(str(params_result))
+            datasource_result = FsDataSource.try_from_message(params_result.datasource)
+            if isinstance(datasource_result, Exception):
+                return UsageError(str(datasource_result))
+            datasink_result = DataSink.create_from_message(params_result.datasink)
+            if isinstance(datasink_result, Exception):
+                return UsageError(str(datasink_result))
+            rpc_result = self.launch_simple_segmentation_export_job_on_cluster(
+                datasource=datasource_result, datasink=datasink_result, label_name=params_result.label_header.name
+            )
         else:
             raise ValueError(f"Invalid method name: '{method_name}'") #FIXME: return error
         return rpc_result
