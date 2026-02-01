@@ -11,8 +11,6 @@ from webilastik.datasink import DataSink
 from webilastik.datasource import DataSource
 from webilastik.simple_segmenter import SimpleSegmenter
 from webilastik.ui.applet.export_jobs import ExportJob
-from webilastik.utility import Minutes
-from webilastik.scheduling.job import PriorityExecutor
 from executor_getter import get_executor
 
 
@@ -35,10 +33,6 @@ def main():
     if isinstance(datasink, Exception):
         print(f"Failed to deserialize datasink: {datasink}", file=sys.stderr)
         sys.exit(1)
-
-    # Set up executor
-    executor = get_executor(hint="cluster_export")
-    priority_executor = PriorityExecutor(executor=executor, max_active_job_steps=4)
 
     # For pixel probabilities export
     if "pixel_probabilities" in job_spec:

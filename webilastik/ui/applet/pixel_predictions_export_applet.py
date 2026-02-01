@@ -35,6 +35,7 @@ from webilastik.ui.applet.export_jobs import CreateDziPyramid, DownscaleDatasour
 from webilastik.ui.applet.ws_applet import WsApplet
 from webilastik.ui.usage_error import UsageError
 from webilastik.ui.applet.brushing_applet import Label
+from webilastik.libebrains.compute_session_launcher import JusufSshJobLauncher, Minutes
 from cryptography.fernet import Fernet
 import asyncio
 import json
@@ -358,8 +359,8 @@ class PixelClassificationExportApplet(StatelesApplet):
         datasource: DataSource,
         datasink: DataSink,
         export_type: str,
-        classifier: VigraPixelClassifier,
-        label_index: int = None,
+        classifier: VigraPixelClassifier[IlpFilter],
+        label_index: int | None = None,
     ):
         # Create job spec
         job_spec = {
