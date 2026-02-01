@@ -8,10 +8,10 @@ from typing import Any
 
 from webilastik.classifiers.pixel_classifier import VigraPixelClassifier
 from webilastik.datasink import DataSink
-from webilastik.datasource import DataSource
+from webilastik.datasource import FsDataSource
+from webilastik.server.rpc.dto import FsDataSourceDto, DataSinkDto
 from webilastik.simple_segmenter import SimpleSegmenter
 from webilastik.ui.applet.export_jobs import ExportJob
-from executor_getter import get_executor
 
 
 def main():
@@ -23,12 +23,17 @@ def main():
     with open(args.job_spec, 'r') as f:
         job_spec = json.load(f)
 
-    # Deserialize components
-    datasource = DataSource.from_dto(job_spec["datasource"])
+    # Deserialize datasource
+    datasource_dto_result = FsDataSourceDto.from_json_value(job_spec["datasource"])
+    if isinstance(datasource_dto_result, Exception):
+        print(f"Failed to parse datasource DTO: {datasource_dto_result}", file=sys.stderr)
+        sys.exit(1)
+    datasource = FsDataSource.try_from_message(datasource_dto_result)
     if isinstance(datasource, Exception):
         print(f"Failed to deserialize datasource: {datasource}", file=sys.stderr)
         sys.exit(1)
 
+    # Deserialize datasink
     datasink = DataSink.create_from_message(job_spec["datasink"])
     if isinstance(datasink, Exception):
         print(f"Failed to deserialize datasink: {datasink}", file=sys.stderr)

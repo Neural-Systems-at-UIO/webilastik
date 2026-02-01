@@ -36,10 +36,9 @@ from webilastik.ui.applet.ws_applet import WsApplet
 from webilastik.ui.usage_error import UsageError
 from webilastik.ui.applet.brushing_applet import Label
 from webilastik.libebrains.compute_session_launcher import JusufSshJobLauncher, Minutes
-from cryptography.fernet import Fernet
 import asyncio
+import base64
 import json
-import tempfile
 import textwrap
 from pathlib import Path
 
@@ -362,8 +361,10 @@ class PixelClassificationExportApplet(StatelesApplet):
         classifier: VigraPixelClassifier[IlpFilter],
         label_index: int | None = None,
     ):
+        from webilastik.config import SessionAllocatorConfig
+
         # Create job spec
-        job_spec = {
+        job_spec: dict[str, Any] = {
             "datasource": datasource.to_dto().to_json_value(),
             "datasink": datasink.to_dto().to_json_value(),
         }
@@ -378,18 +379,21 @@ class PixelClassificationExportApplet(StatelesApplet):
                 "label_index": label_index,
             }
 
-        # Write job spec to temp file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            json.dump(job_spec, f)
-            job_spec_path = f.name
+        # Encode job spec as base64 for passing via environment variable
+        job_spec_json = json.dumps(job_spec)
+        job_spec_b64 = base64.b64encode(job_spec_json.encode('utf-8')).decode('ascii')
 
-        # Create sbatch script
-        sbatch_script = self._create_export_sbatch_script(job_name, job_spec_path)
+        # Create sbatch script with embedded job spec
+        sbatch_script = self._create_export_sbatch_script(job_name, job_spec_b64)
 
-        # Submit to cluster
-        # FIXME: Use proper fernet from session allocator config
-        dummy_fernet = Fernet(Fernet.generate_key())
-        launcher = JusufSshJobLauncher(fernet=dummy_fernet)
+        # Get fernet from session allocator config
+        try:
+            config = SessionAllocatorConfig.get()
+            launcher = JusufSshJobLauncher(fernet=config.fernet)
+        except Exception as e:
+            print(f"Failed to get session allocator config: {e}")
+            return
+
         result = await launcher.submit_sbatch_script(
             job_name=f"webilastik-export-{job_name.lower().replace(' ', '-')}",
             max_duration_minutes=Minutes(60),  # FIXME: make configurable
@@ -400,50 +404,74 @@ class PixelClassificationExportApplet(StatelesApplet):
             print(f"Failed to submit export job to cluster: {result}")
             return
 
-        # Create a dummy job to track the cluster job
-        from webilastik.scheduling.job import SimpleJob
-        dummy_job = SimpleJob(
-            name=f"Cluster: {job_name}",
-            target=lambda: None,  # No actual work, just tracking
+        # Track the cluster job using a placeholder job
+        # Note: We use result.compute_session_id for display but generate a proper UUID for internal tracking
+        import uuid as uuid_module
+        tracking_job = SimpleJob(
+            name=f"Cluster: {job_name} (SLURM #{result.native_compute_session_id})",
+            target=lambda: None,
         )
-        dummy_job._status = type(dummy_job._status)(num_completed_steps=0, num_dispatched_steps=1)  # Mark as running
-        dummy_job.uuid = result.compute_session_id  # Use the SLURM job ID as UUID
+        # Mark as in-progress
+        tracking_job._status = type(tracking_job._status)(num_completed_steps=0, num_dispatched_steps=1)
 
         with self._lock:
-            self._jobs[dummy_job.uuid] = dummy_job
+            self._jobs[tracking_job.uuid] = tracking_job
         self.on_async_change()
 
-    def _create_export_sbatch_script(self, job_name: str, job_spec_path: str) -> str:
-        # Create a proper sbatch script similar to JusufSshJobLauncher
-        working_dir = f"$SCRATCH/webilastik_export_{job_name.lower().replace(' ', '_')}"
-        conda_env_dir = f"$HOME/miniconda3/envs/webilastik"  # FIXME: make configurable
+    def _create_export_sbatch_script(self, job_name: str, job_spec_b64: str) -> str:
+        """Create sbatch script for running export job on cluster.
 
-        out = textwrap.dedent(f"""
+        Args:
+            job_name: Human-readable job name
+            job_spec_b64: Base64-encoded JSON job specification
+        """
+        import uuid as uuid_module
+        account = "ebrains-0000003"
+        scratch_dir = f"/p/scratch/{account}"
+        home = f"/p/project1/{account}"
+        job_id = str(uuid_module.uuid4())
+        working_dir = f"{scratch_dir}/{job_id}"
+        webilastik_source_dir = f"{working_dir}/webilastik"
+        conda_env_dir = f"{home}/miniforge3/envs/webilastik"
+        python_executable = f"{conda_env_dir}/bin/python"
+
+        out = textwrap.dedent(f"""\
             #!/bin/bash -l
             #SBATCH --nodes=1
             #SBATCH --ntasks=1
             #SBATCH --partition=batch
             #SBATCH --hint=nomultithread
 
+            jutil env activate -p {account}
+
             set -xeu
             set -o pipefail
 
-            # Set up environment
-            module load Stages/2025  # FIXME: make configurable
+            module load git
+            module load Stages/2025
             module load GCC
             module load OpenMPI
 
             mkdir -p {working_dir}
             cd {working_dir}
 
-            # Copy job spec to working directory
-            cp {job_spec_path} ./job_spec.json
+            # Clone webilastik repo
+            git clone --depth 1 --branch master {home}/webilastik.git {webilastik_source_dir}
 
-            # Set up Python environment
-            export PYTHONPATH="$HOME/webilastik:$PYTHONPATH"  # FIXME: proper paths
+            # Decode and write job spec
+            export WEBILASTIK_EXPORT_JOB_SPEC_B64="{job_spec_b64}"
+            echo "$WEBILASTIK_EXPORT_JOB_SPEC_B64" | base64 -d > {working_dir}/job_spec.json
+
+            # Prevent numpy from spawning its own threads
+            export OPENBLAS_NUM_THREADS=1
+            export MKL_NUM_THREADS=1
+
+            # Set up Python path
+            export PYTHONPATH="{webilastik_source_dir}/executor_getter_impls/jusuf/:{webilastik_source_dir}/global_cache_impls/no_cache/:{webilastik_source_dir}"
 
             # Run the export worker
-            {conda_env_dir}/bin/python -m webilastik.ui.applet.export_worker --job_spec ./job_spec.json
+            srun -n 1 --overlap -u --cpus-per-task 120 --threads-per-core=1 \\
+                "{python_executable}" -m webilastik.ui.applet.export_worker --job_spec {working_dir}/job_spec.json
 
             # Clean up
             rm -rf {working_dir}
