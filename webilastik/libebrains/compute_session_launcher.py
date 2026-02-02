@@ -385,35 +385,6 @@ class SshJobLauncher:
         return Exception(f"Could not retrieve job with id {native_compute_session_id}")
 
 
-    async def submit_sbatch_script(
-        self,
-        *,
-        job_name: str,
-        max_duration_minutes: Minutes,
-        sbatch_script: str,
-    ) -> "ComputeSession | Exception":
-        output_result = await self.do_ssh(
-            command="sbatch",
-            command_args=[
-                f"--job-name={job_name}",
-                f"--time={max_duration_minutes.to_int()}",
-                f"--account={self.account}",
-            ],
-            stdin=sbatch_script,
-        )
-        if isinstance(output_result, Exception):
-            return output_result
-
-        native_compute_session_id = NativeComputeSessionId(int(output_result.split()[3]))
-
-        for _ in range(5):
-            await asyncio.sleep(0.7)
-            job = await self.get_compute_session_by_native_id(native_compute_session_id=native_compute_session_id)
-            if isinstance(job, (Exception, ComputeSession)):
-                return job
-        return Exception(f"Could not retrieve job with id {native_compute_session_id}")
-
-
     async def cancel(self, compute_session: ComputeSession) -> "Exception | None":
         result = await self.do_ssh(command="scancel", command_args=[str(compute_session.native_compute_session_id)])
         if isinstance(result, Exception):

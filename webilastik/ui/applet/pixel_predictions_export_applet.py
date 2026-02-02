@@ -4,6 +4,8 @@ from pathlib import PurePosixPath
 import threading
 from typing import Any, Callable, Dict, Literal, Sequence, TypeVar
 import uuid
+import os
+import sys
 
 import numpy as np
 from ndstructs.array5D import Array5D
@@ -35,18 +37,26 @@ from webilastik.ui.applet.export_jobs import CreateDziPyramid, DownscaleDatasour
 from webilastik.ui.applet.ws_applet import WsApplet
 from webilastik.ui.usage_error import UsageError
 from webilastik.ui.applet.brushing_applet import Label
-from webilastik.libebrains.compute_session_launcher import JusufSshJobLauncher, Minutes
-import asyncio
-import base64
-import json
-import textwrap
-from pathlib import Path
 
 _OK = TypeVar("_OK")
 _ERR = TypeVar("_ERR", bound=Exception)
 _SINK = TypeVar("_SINK", bound=DataSink)
 
 # ExportJobUnion = Union[ExportJob, CreateDziPyramid, DownscaleDatasource, ZipDirectory]
+
+def _get_export_timeout_seconds() -> float | None:
+    raw_timeout = os.environ.get("WEBILASTIK_EXPORT_TIMEOUT_MINUTES")
+    if raw_timeout is None or not raw_timeout.strip():
+        return None
+    try:
+        return float(raw_timeout) * 60.0
+    except Exception:
+        print(
+            "Invalid WEBILASTIK_EXPORT_TIMEOUT_MINUTES; export timeout disabled",
+            file=sys.stderr,
+        )
+        return None
+
 
 class PixelClassificationExportApplet(StatelesApplet):
     def __init__(
@@ -68,6 +78,7 @@ class PixelClassificationExportApplet(StatelesApplet):
 
         self._jobs: Dict[uuid.UUID, Job[Any, Any]] = {}
         self._lock = threading.Lock()
+        self._export_timeout_seconds = _get_export_timeout_seconds()
         super().__init__(name=name)
 
     def _remove_job(self, job_id: uuid.UUID):
@@ -83,6 +94,13 @@ class PixelClassificationExportApplet(StatelesApplet):
             self.on_async_change()
             on_success(status.result)
         job.add_done_callback(on_complete)
+
+        timeout_seconds = self._export_timeout_seconds
+        if timeout_seconds is not None:
+            timeout_timer = threading.Timer(timeout_seconds, job.cancel)
+            timeout_timer.daemon = True
+            timeout_timer.start()
+            job.add_done_callback(lambda _: timeout_timer.cancel())
 
         print(f"LAUNCHING JOB!!!!!!!!!!!!!!11 {job.name} !!!!!!!!!!!!!!!!!!!!!!!!")
         self.priority_executor.submit_job(job)
@@ -247,7 +265,7 @@ class PixelClassificationExportApplet(StatelesApplet):
                 encoding=RawEncoder(),
                 interval=datasink.interval,
                 path=PurePosixPath("/raw_results/temp.precomputed"),
-                resolution=(1,1,1),
+                resolution=(1, 1, 1),
                 scale_key=PurePosixPath("temp_export"),
                 tile_shape=datasink.tile_shape,
             )
@@ -299,184 +317,7 @@ class PixelClassificationExportApplet(StatelesApplet):
             clean_on_success=clean_export_on_success,
         )
 
-
-    def launch_pixel_probabilities_export_job_on_cluster(self, *, datasource: DataSource, datasink: DataSink) -> "UsageError | None":
-        classifier = self._in_operator()
-        if classifier is None:
-            return UsageError("Upstream not ready yet")
-        expected_shape = datasource.shape.updated(c=classifier.num_classes)
-        if datasink.shape != expected_shape:
-            return UsageError(f"Bad sink shape. Expected {expected_shape} but got {datasink.shape}")
-        if datasink.dtype != np.dtype("float32"):
-            return UsageError("Data sink should have dtype of float32 for this kind of export")
-        if isinstance(datasink, FsDataSink) and isinstance(datasink.filesystem, ZipFs):
-            return UsageError("Exporting pixel probabilities to Zip archives is not supported yet")
-
-        # Submit to cluster
-        asyncio.create_task(self._submit_export_to_cluster(
-            job_name="Pixel Probabilities Export",
-            datasource=datasource,
-            datasink=datasink,
-            export_type="pixel_probabilities",
-            classifier=classifier,
-        ))
         return None
-
-    def launch_simple_segmentation_export_job_on_cluster(
-        self, *, datasource: DataSource, datasink: DataSink, label_name: str,
-    ) -> "UsageError | None":
-        with self._lock:
-            label_name_indices: Dict[str, int] = {label.name: idx for idx, label in enumerate(self._in_populated_labels() or [])}
-            classifier = self._in_operator()
-        if label_name not in label_name_indices:
-            return UsageError(f"Bad label name: {label_name}")
-        if classifier is None:
-            return UsageError("Applets upstream are not ready yet")
-        if not classifier.is_applicable_to(datasource):
-            return UsageError(f"Classifier is not compatible with provided datasource: {datasource}")
-        expected_shape = datasource.shape.updated(c=3)
-        if datasink.shape != expected_shape:
-            return UsageError(f"Data sink shape {datasink.shape} does not meet expectations: {expected_shape}")
-        if datasink.dtype != np.dtype("uint8"):
-            return UsageError("Data sink should have dtype of 'uint8' for this kind of export")
-
-        # Submit to cluster
-        asyncio.create_task(self._submit_export_to_cluster(
-            job_name="Simple Segmentation Export",
-            datasource=datasource,
-            datasink=datasink,
-            export_type="simple_segmentation",
-            classifier=classifier,
-            label_index=label_name_indices[label_name],
-        ))
-        return None
-
-    async def _submit_export_to_cluster(
-        self,
-        *,
-        job_name: str,
-        datasource: DataSource,
-        datasink: DataSink,
-        export_type: str,
-        classifier: VigraPixelClassifier[IlpFilter],
-        label_index: int | None = None,
-    ):
-        from webilastik.config import SessionAllocatorConfig
-
-        # Create job spec
-        job_spec: dict[str, Any] = {
-            "datasource": datasource.to_dto().to_json_value(),
-            "datasink": datasink.to_dto().to_json_value(),
-        }
-
-        if export_type == "pixel_probabilities":
-            job_spec["pixel_probabilities"] = {
-                "classifier": classifier.to_dto().to_json_value(),
-            }
-        elif export_type == "simple_segmentation":
-            job_spec["simple_segmentation"] = {
-                "classifier": classifier.to_dto().to_json_value(),
-                "label_index": label_index,
-            }
-
-        # Encode job spec as base64 for passing via environment variable
-        job_spec_json = json.dumps(job_spec)
-        job_spec_b64 = base64.b64encode(job_spec_json.encode('utf-8')).decode('ascii')
-
-        # Create sbatch script with embedded job spec
-        sbatch_script = self._create_export_sbatch_script(job_name, job_spec_b64)
-
-        # Get fernet from session allocator config
-        try:
-            config = SessionAllocatorConfig.get()
-            launcher = JusufSshJobLauncher(fernet=config.fernet)
-        except Exception as e:
-            print(f"Failed to get session allocator config: {e}")
-            return
-
-        result = await launcher.submit_sbatch_script(
-            job_name=f"webilastik-export-{job_name.lower().replace(' ', '-')}",
-            max_duration_minutes=Minutes(60),  # FIXME: make configurable
-            sbatch_script=sbatch_script,
-        )
-
-        if isinstance(result, Exception):
-            print(f"Failed to submit export job to cluster: {result}")
-            return
-
-        # Track the cluster job using a placeholder job
-        # Note: We use result.compute_session_id for display but generate a proper UUID for internal tracking
-        import uuid as uuid_module
-        tracking_job = SimpleJob(
-            name=f"Cluster: {job_name} (SLURM #{result.native_compute_session_id})",
-            target=lambda: None,
-        )
-        # Mark as in-progress
-        tracking_job._status = type(tracking_job._status)(num_completed_steps=0, num_dispatched_steps=1)
-
-        with self._lock:
-            self._jobs[tracking_job.uuid] = tracking_job
-        self.on_async_change()
-
-    def _create_export_sbatch_script(self, job_name: str, job_spec_b64: str) -> str:
-        """Create sbatch script for running export job on cluster.
-
-        Args:
-            job_name: Human-readable job name
-            job_spec_b64: Base64-encoded JSON job specification
-        """
-        import uuid as uuid_module
-        account = "ebrains-0000003"
-        scratch_dir = f"/p/scratch/{account}"
-        home = f"/p/project1/{account}"
-        job_id = str(uuid_module.uuid4())
-        working_dir = f"{scratch_dir}/{job_id}"
-        webilastik_source_dir = f"{working_dir}/webilastik"
-        conda_env_dir = f"{home}/miniforge3/envs/webilastik"
-        python_executable = f"{conda_env_dir}/bin/python"
-
-        out = textwrap.dedent(f"""\
-            #!/bin/bash -l
-            #SBATCH --nodes=1
-            #SBATCH --ntasks=1
-            #SBATCH --partition=batch
-            #SBATCH --hint=nomultithread
-
-            jutil env activate -p {account}
-
-            set -xeu
-            set -o pipefail
-
-            module load git
-            module load Stages/2025
-            module load GCC
-            module load OpenMPI
-
-            mkdir -p {working_dir}
-            cd {working_dir}
-
-            # Clone webilastik repo
-            git clone --depth 1 --branch master {home}/webilastik.git {webilastik_source_dir}
-
-            # Decode and write job spec
-            export WEBILASTIK_EXPORT_JOB_SPEC_B64="{job_spec_b64}"
-            echo "$WEBILASTIK_EXPORT_JOB_SPEC_B64" | base64 -d > {working_dir}/job_spec.json
-
-            # Prevent numpy from spawning its own threads
-            export OPENBLAS_NUM_THREADS=1
-            export MKL_NUM_THREADS=1
-
-            # Set up Python path
-            export PYTHONPATH="{webilastik_source_dir}/executor_getter_impls/jusuf/:{webilastik_source_dir}/global_cache_impls/no_cache/:{webilastik_source_dir}"
-
-            # Run the export worker
-            srun -n 1 --overlap -u --cpus-per-task 120 --threads-per-core=1 \\
-                "{python_executable}" -m webilastik.ui.applet.export_worker --job_spec {working_dir}/job_spec.json
-
-            # Clean up
-            rm -rf {working_dir}
-        """)
-        return out
 
 
 class WsPixelClassificationExportApplet(WsApplet, PixelClassificationExportApplet):
@@ -506,32 +347,6 @@ class WsPixelClassificationExportApplet(WsApplet, PixelClassificationExportApple
                 return UsageError(str(datasink_result)) #FIXME: may not be an usage error
 
             rpc_result = self.launch_simple_segmentation_export_job(datasource=datasource_result, datasink=datasink_result, label_name=params_result.label_header.name)
-        elif method_name == "launch_pixel_probabilities_export_job_on_cluster":
-            params_result = StartPixelProbabilitiesExportJobParamsDto.from_json_value(arguments)
-            if isinstance(params_result, MessageParsingError):
-                return UsageError(str(params_result))
-            datasource_result = FsDataSource.try_from_message(params_result.datasource)
-            if isinstance(datasource_result, Exception):
-                return UsageError(str(datasource_result))
-            datasink_result = DataSink.create_from_message(params_result.datasink)
-            if isinstance(datasink_result, Exception):
-                return UsageError(str(datasink_result))
-            rpc_result = self.launch_pixel_probabilities_export_job_on_cluster(
-                datasource=datasource_result, datasink=datasink_result
-            )
-        elif method_name == "launch_simple_segmentation_export_job_on_cluster":
-            params_result = StartSimpleSegmentationExportJobParamsDto.from_json_value(arguments)
-            if isinstance(params_result, MessageParsingError):
-                return UsageError(str(params_result))
-            datasource_result = FsDataSource.try_from_message(params_result.datasource)
-            if isinstance(datasource_result, Exception):
-                return UsageError(str(datasource_result))
-            datasink_result = DataSink.create_from_message(params_result.datasink)
-            if isinstance(datasink_result, Exception):
-                return UsageError(str(datasink_result))
-            rpc_result = self.launch_simple_segmentation_export_job_on_cluster(
-                datasource=datasource_result, datasink=datasink_result, label_name=params_result.label_header.name
-            )
         else:
             raise ValueError(f"Invalid method name: '{method_name}'") #FIXME: return error
         return rpc_result
