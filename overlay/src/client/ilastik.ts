@@ -4,7 +4,7 @@ import { assertUnreachable, fetchJson, parseJson, PermissionError, RequestFailur
 import { Path, Url } from "../util/parsed_url"
 import { DataType, ensureDataType } from "../util/precomputed_chunks"
 import {
-    ensureJsonObject, ensureJsonString, fromBase64, JsonableValue, JsonValue, toBase64, toJsonValue
+    ensureJsonNumber, ensureJsonObject, ensureJsonString, fromBase64, JsonableValue, JsonValue, toBase64, toJsonValue
 } from "../util/serialization"
 import {
     BucketFSDto,
@@ -246,6 +246,37 @@ export class Session{
 
     public get sessionId(): string{
         return this.sessionStatus.compute_session.compute_session_id
+    }
+
+    public async getRuntimeStatus(): Promise<{
+        start_time_utc: number,
+        max_duration_minutes: number,
+    } | Error>{
+        const response = await fetchJson(
+            this.sessionUrl.joinPath("status").raw,
+            {
+                cache: "no-store",
+                method: "GET",
+            },
+        )
+        if(response instanceof Error){
+            return response
+        }
+        const obj = ensureJsonObject(response)
+        const start_time_utc = ensureJsonNumber(obj.start_time_utc)
+        const max_duration_minutes = ensureJsonNumber(obj.max_duration_minutes)
+        return {start_time_utc, max_duration_minutes}
+    }
+
+    public async getRemainingRuntimeSeconds(): Promise<number | undefined | Error>{
+        const status = await this.getRuntimeStatus()
+        if(status instanceof Error){
+            return status
+        }
+        const deadline_utc_sec = status.start_time_utc + status.max_duration_minutes * 60
+        const now_utc_sec = Date.now() / 1000
+        const remaining = deadline_utc_sec - now_utc_sec
+        return Math.max(0, remaining)
     }
 
     private openWebsocket(): WebSocket{

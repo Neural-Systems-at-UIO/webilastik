@@ -85,7 +85,7 @@ export class SessionManagerWidget{
                             cssClasses: [CssClasses.ItkInputParagraph],
                             children: [
                                 new Label({parentElement: undefined, innerText: "Duration (minutes): "}),
-                                this.sessionDurationInput = new NumberInput({parentElement: undefined, value: 60, min: 5, required: true}),
+                                    this.sessionDurationInput = new NumberInput({parentElement: undefined, value: 240, min: 5, required: true}),
                                 this.createSessionButton = new Button({parentElement: undefined, inputType: "submit", text: "⏻ Create"}),
                             ]
                         }),

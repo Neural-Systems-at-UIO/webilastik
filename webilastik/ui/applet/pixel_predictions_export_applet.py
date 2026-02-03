@@ -4,8 +4,6 @@ from pathlib import PurePosixPath
 import threading
 from typing import Any, Callable, Dict, Literal, Sequence, TypeVar
 import uuid
-import os
-import sys
 
 import numpy as np
 from ndstructs.array5D import Array5D
@@ -44,19 +42,6 @@ _SINK = TypeVar("_SINK", bound=DataSink)
 
 # ExportJobUnion = Union[ExportJob, CreateDziPyramid, DownscaleDatasource, ZipDirectory]
 
-def _get_export_timeout_seconds() -> float | None:
-    raw_timeout = os.environ.get("WEBILASTIK_EXPORT_TIMEOUT_MINUTES")
-    if raw_timeout is None or not raw_timeout.strip():
-        return None
-    try:
-        return float(raw_timeout) * 60.0
-    except Exception:
-        print(
-            "Invalid WEBILASTIK_EXPORT_TIMEOUT_MINUTES; export timeout disabled",
-            file=sys.stderr,
-        )
-        return None
-
 
 class PixelClassificationExportApplet(StatelesApplet):
     def __init__(
@@ -78,7 +63,6 @@ class PixelClassificationExportApplet(StatelesApplet):
 
         self._jobs: Dict[uuid.UUID, Job[Any, Any]] = {}
         self._lock = threading.Lock()
-        self._export_timeout_seconds = _get_export_timeout_seconds()
         super().__init__(name=name)
 
     def _remove_job(self, job_id: uuid.UUID):
@@ -94,13 +78,6 @@ class PixelClassificationExportApplet(StatelesApplet):
             self.on_async_change()
             on_success(status.result)
         job.add_done_callback(on_complete)
-
-        timeout_seconds = self._export_timeout_seconds
-        if timeout_seconds is not None:
-            timeout_timer = threading.Timer(timeout_seconds, job.cancel)
-            timeout_timer.daemon = True
-            timeout_timer.start()
-            job.add_done_callback(lambda _: timeout_timer.cancel())
 
         print(f"LAUNCHING JOB!!!!!!!!!!!!!!11 {job.name} !!!!!!!!!!!!!!!!!!!!!!!!")
         self.priority_executor.submit_job(job)

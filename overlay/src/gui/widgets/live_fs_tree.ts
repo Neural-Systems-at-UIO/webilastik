@@ -24,7 +24,11 @@ export class LiveFsTree{
             }))
             removeElement(loadingGif)
             if(items_result instanceof Error){
-                createElement({tagName: "p", parentElement: folderWidget.element, innerText: "Failed retrieving folder contents"})
+                createElement({
+                    tagName: "p",
+                    parentElement: folderWidget.element,
+                    innerText: `Failed retrieving folder contents: ${items_result.message}`,
+                })
                 return
             }
             for(const dir of items_result.directories){

@@ -1,8 +1,8 @@
 import { Applet } from '../../client/applets/applet';
 import { JsonValue } from '../../util/serialization';
-import { assertUnreachable, createElement, createFieldset } from '../../util/misc';
+import { createFieldset } from '../../util/misc';
 import { CollapsableWidget } from './collapsable_applet_gui';
-import { BucketFs, Color, FsDataSource, FsDataSink, Session, PrecomputedChunksSink, Shape5D, ZipFs, DziLevelDataSource } from '../../client/ilastik';
+import { BucketFs, Color, FsDataSource, FsDataSink, Session, Shape5D, ZipFs, DziLevelDataSource } from '../../client/ilastik';
 import { CssClasses } from '../css_classes';
 import { ErrorPopupWidget, PopupWidget } from './popup';
 import {
@@ -16,14 +16,13 @@ import {
     LabelHeaderDto,
     OpenDatasinkJobDto,
     PixelClassificationExportAppletStateDto,
-    StartPixelProbabilitiesExportJobParamsDto,
     StartSimpleSegmentationExportJobParamsDto,
     ZipDirectoryJobDto,
     TransferFileJobDto,
 } from '../../client/dto';
 import { Viewer } from '../../viewer/viewer';
 import { DataSourceListWidget } from './list_widget';
-import { DatasinkConfigWidget, UnsupportedDziDataType } from './datasink_builder_widget';
+import { DatasinkConfigWidget } from './datasink_builder_widget';
 import { DataType } from '../../util/precomputed_chunks';
 import { FileLocationPatternInputWidget } from './file_location_input';
 import { Button, ButtonWidget, Select } from './input_widget';
@@ -32,7 +31,6 @@ import { Path, Url } from '../../util/parsed_url';
 import { BooleanInput } from './value_input_widget';
 import { Shape5DInputNoChannel } from './shape5d_input';
 import { DataSourceSelectionWidget } from './datasource_selection_widget';
-import { TabsWidget } from './tabs_widget';
 import { ExportPattern } from '../../util/export_pattern';
 import { HashMap } from '../../util/hashmap';
 
@@ -99,7 +97,8 @@ class Job{
             })
         }
         if(!(jobDto.status instanceof JobFinishedDto)){
-            assertUnreachable(jobDto.status)
+            // unexpected status
+            return new Td({parentElement: undefined, innerText: "unknown"})
         }
         if(jobDto.status.error_message){
             let td = new Td({parentElement: undefined, innerText: "failed"})
@@ -120,14 +119,6 @@ class Job{
             const sink = FsDataSink.fromDto(jobDto.datasink)
             if(sink.filesystem instanceof BucketFs){
                 dataProxyGuiUrl = sink.filesystem.getDataProxyGuiUrl({dirPath: sink.path})
-            }
-            if(sink instanceof PrecomputedChunksSink){
-                new Button({parentElement: out, inputType: "button", text: "Open", onClick: () => {
-                    DataSourceSelectionWidget.tryOpenViews({
-                        urls: [sink.toDataSource().url], viewer: params.viewer, session: params.session
-                    })
-                }})
-                createElement({parentElement: out.element, tagName: "br"}) //FIXME?
             }
         }else{
             out.element.innerText = "100%"
@@ -198,7 +189,6 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
     private datasourceListWidget: DataSourceListWidget;
     private customTileShapeCheckbox: BooleanInput;
     private tileShapeInput: Shape5DInputNoChannel
-    private exportModeSelector: TabsWidget<"pixel probabilities" | "simple segmentation", Paragraph>;
     private startExportsButton: Button<"button">;
     private startExportButtonStatusText: Label;
 
@@ -228,10 +218,11 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
         this.element = new CollapsableWidget({display_name: "Export Predictions", parentElement, help}).element
         this.element.classList.add("ItkPredictionsExportApplet")
 
-        this.exportModeSelector = new TabsWidget({parentElement: this.element, tabBodyWidgets: new Map([
-            ["simple segmentation", this.labelSelectorContainer = new Paragraph({parentElement: this.element})],
-            ["pixel probabilities", new Paragraph({parentElement: undefined, innerText: "Exports an image with one float32 channel per class (brush color)"})],
-        ])})
+        this.labelSelectorContainer = new Paragraph({parentElement: this.element})
+        new Paragraph({
+            parentElement: this.element,
+            innerText: "Exports simple segmentation (uint8) as Deep Zoom (DZI/DZIP).",
+        })
 
         const datasourceFieldset = createFieldset({parentElement: this.element, legend: "Input Datasets:"})
         this.datasourceListWidget = new DataSourceListWidget({
@@ -251,7 +242,7 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
                 "{parent_dir_path} The full path of the directory in which the input is\n" +
                 "{output_type} the semantic meaning of the data in the output. Either 'simple_segmentation' or 'pixel_probabilities'\n" +
                 "{timestamp} a string representing the time when the job was submitted (e.g. '2023y12m31d__13h59min58s')\n" +
-                "{extension} the file (or folder) extension, representing the data type (e.g. 'n5', 'dzi')"
+                "{extension} the file (or folder) extension, representing the data type (e.g. 'dzi', 'dzip')"
         })
         const datasinkConfigWidget = new DatasinkConfigWidget({parentElement: datasinkFieldset})
 
@@ -269,18 +260,42 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
 
         new Paragraph({parentElement: this.element, cssClasses: [CssClasses.ItkInputParagraph], children: [
             this.startExportsButton = new Button({parentElement: undefined, inputType: "button", text: "Start Export Jobs", onClick: async () => {
-                const exportMode = this.exportModeSelector.current.label
+                const remainingSecondsResult = await this.session.getRemainingRuntimeSeconds()
+                if(!(remainingSecondsResult instanceof Error) && remainingSecondsResult !== undefined){
+                    const remainingMinutes = remainingSecondsResult / 60
+                    if(remainingMinutes <= 0){
+                        new ErrorPopupWidget({message: "This session has no remaining walltime. Create a new session with a longer duration."})
+                        return
+                    }
+                    const warnBelowMinutes = 20
+                    if(remainingMinutes < warnBelowMinutes){
+                        const proceed = await new Promise<boolean>(resolve => {
+                            const popup = new PopupWidget("Session time warning")
+                            new Paragraph({
+                                parentElement: popup.contents,
+                                innerText: `Only ~${Math.ceil(remainingMinutes)} minutes of session time remain. Exports may be interrupted when SLURM hits the time limit.`
+                            })
+                            new Paragraph({parentElement: popup.contents, cssClasses: [CssClasses.ItkInputParagraph], children: [
+                                new Button({inputType: "button", parentElement: undefined, text: "Continue anyway", onClick: () => {
+                                    popup.destroy();
+                                    resolve(true)
+                                }}),
+                                new Button({inputType: "button", parentElement: undefined, text: "Cancel", onClick: () => {
+                                    popup.destroy();
+                                    resolve(false)
+                                }}),
+                            ]})
+                        })
+                        if(!proceed){
+                            return
+                        }
+                    }
+                }
+
                 let dtype: DataType;
                 let numChannels: number;
-                if(exportMode == "pixel probabilities"){
-                    dtype = "float32"
-                    numChannels = this.labelToExportSelector?.options.length || 0 //FIXME: maybe just save the number of labels in state?
-                }else if(exportMode == "simple segmentation"){
-                    dtype = "uint8"
-                    numChannels = 3
-                }else{
-                    assertUnreachable(exportMode)
-                }
+                dtype = "uint8"
+                numChannels = 3
 
                 if(numChannels == 0){
                     new ErrorPopupWidget({message: "Training isn't done yet"})
@@ -292,7 +307,7 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
                     return
                 }
 
-                const jobSubmissionPayloads: Array<StartPixelProbabilitiesExportJobParamsDto | StartSimpleSegmentationExportJobParamsDto> = []
+                const jobSubmissionPayloads: Array<StartSimpleSegmentationExportJobParamsDto> = []
                 const outputPathToInputUrl = new HashMap<Path, Url, string>();
                 for(let job_index=0; job_index < this.datasourceListWidget.value.length; job_index++){
                     const datasource = this.datasourceListWidget.value[job_index]
@@ -308,7 +323,7 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
                     let fileLocation = fileLocationInputWidget.tryGetLocation({
                         itemIndex: job_index,
                         inputPath: inputPath,
-                        resultType: exportMode,
+                        resultType: "simple segmentation",
                         extension: datasinkConfigWidget.extension,
                     });
                     if(fileLocation === undefined){
@@ -338,15 +353,6 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
                         resolution: datasource.spatial_resolution,
                         tile_shape: datasink_tile_shape.updated({c: numChannels}),
                     })
-                    if(datasink_result instanceof UnsupportedDziDataType && exportMode == "pixel probabilities"){
-                        new ErrorPopupWidget({
-                            message: (
-                                "Can't export pixel probabilities as .dzip, since those are float values. " +
-                                "Maybe you meant to use 'simple segmentation'?"
-                            )
-                        })
-                        return
-                    }
                     if(datasink_result instanceof Error){
                         new ErrorPopupWidget({message: datasink_result.message})
                         return
@@ -378,38 +384,23 @@ export class PredictionsExportWidget extends Applet<PixelClassificationExportApp
                     }
                     outputPathToInputUrl.set(outputPath, datasource.url)
 
-                    datasink_result
-                    if(exportMode == "pixel probabilities"){
-                        jobSubmissionPayloads.push(
-                            new StartPixelProbabilitiesExportJobParamsDto({
-                                datasource: datasource.toDto(), datasink: datasink_result.toDto()
-                            })
-                        )
-                        // this.doRPC("launch_pixel_probabilities_export_job", )
-                    }else if(exportMode == "simple segmentation"){
-                        const label_header = this.labelToExportSelector?.value;
-                        if(!label_header){
-                            new ErrorPopupWidget({message: "Missing export parameters"})
-                            return
-                        }
-                        jobSubmissionPayloads.push(
-                            new StartSimpleSegmentationExportJobParamsDto({
-                                datasource: datasource.toDto(), datasink: datasink_result.toDto(), label_header: label_header.toDto()
-                            })
-                        )
-                        // this.doRPC("launch_simple_segmentation_export_job", )
-                    }else{
-                        assertUnreachable(exportMode)
+                    const label_header = this.labelToExportSelector?.value;
+                    if(!label_header){
+                        new ErrorPopupWidget({message: "Missing export parameters"})
+                        return
                     }
+                    jobSubmissionPayloads.push(
+                        new StartSimpleSegmentationExportJobParamsDto({
+                            datasource: datasource.toDto(), datasink: datasink_result.toDto(), label_header: label_header.toDto()
+                        })
+                    )
                 }
                 const jobsSubmissionResult = await PopupWidget.WaitPopup({
                     title: "Submitting jobs...",
                     operation: this.session.doHttpRpc(
                         jobSubmissionPayloads.map(payload => ({
                             applet_name: this.name,
-                            method_name: payload instanceof StartPixelProbabilitiesExportJobParamsDto ?
-                                "launch_pixel_probabilities_export_job" :
-                                "launch_simple_segmentation_export_job",
+                            method_name: "launch_simple_segmentation_export_job",
                             arguments: payload,
                         }))
                     )

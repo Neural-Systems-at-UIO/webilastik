@@ -22,6 +22,8 @@ def create_filesystem_from_message(message: FsDto) -> "IFilesystem | Exception":
         from webilastik.filesystem.zip_fs import ZipFs
         return ZipFs.from_dto(message)
 
+    return Exception(f"Unsupported filesystem DTO: {type(message).__name__}")
+
 
 def create_filesystem_from_url(url: Url) -> "Tuple[IFilesystem, PurePosixPath] | Exception":
     from webilastik.filesystem.zip_fs import ZipFs
