@@ -2,11 +2,16 @@
 
 from abc import ABC, abstractmethod
 import atexit
+import os
 import threading
-from concurrent.futures import Executor, ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import Executor, ThreadPoolExecutor
 from typing import Optional
-import multiprocessing as mp
 import sys
+
+# Prevent numpy/BLAS from spawning hidden threads that compete with our explicit parallelism
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 from webilastik.scheduling import ExecutorGetter, ExecutorHint, SerialExecutor
 # from webilastik.scheduling.hashing_mpi_executor import HashingMpiExecutor
@@ -44,20 +49,16 @@ class ExecutorManager(ABC):
 #     def _create_executor(self, max_workers: Optional[int]) -> Executor:
 #         return HashingMpiExecutor()
 
-class ProcessPoolExecutorManager(ExecutorManager):
-    def _create_executor(self, max_workers: Optional[int]) -> Executor:
-        return ProcessPoolExecutor(max_workers=8, mp_context=mp.get_context("spawn"))
-
 class ThreadPoolExecutorManager(ExecutorManager):
     WORKER_THERAD_PREFIX = "worker_pool_thread_"
 
     def _create_executor(self, max_workers: Optional[int]) -> Executor:
-        return ThreadPoolExecutor(max_workers=8, thread_name_prefix=self.WORKER_THERAD_PREFIX)
+        workers = max_workers or os.cpu_count() or 8
+        print(f"Creating ThreadPoolExecutor with {workers} workers", file=sys.stderr)
+        return ThreadPoolExecutor(max_workers=workers, thread_name_prefix=self.WORKER_THERAD_PREFIX)
 
 
-# _server_executor_manager = MPICommExecutorManager()
-# _server_executor_manager = HashingMpiExecutorManager()
-_server_executor_manager = ProcessPoolExecutorManager()
+_server_executor_manager = ThreadPoolExecutorManager()
 _worker_thread_pool_manager = ThreadPoolExecutorManager()
 
 
