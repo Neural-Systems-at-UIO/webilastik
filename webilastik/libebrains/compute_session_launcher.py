@@ -658,14 +658,14 @@ class LocalJobLauncher(SshJobLauncher):
 
 
 class JusufSshJobLauncher(SshJobLauncher):
-    def __init__(self, fernet: Fernet, executor_getter: Literal["jusuf", "dask"] = "jusuf", branch: Literal["master", "dev"] = "master") -> None:
+    def __init__(self, fernet: Fernet, executor_getter: Literal["slurm", "jusuf", "dask"] = "slurm", branch: Literal["master", "dev"] = "master") -> None:
         super().__init__(
             user=Username("webilastic-quint"),
             hostname=Hostname("jusuf.fz-juelich.de"),
             account="ebrains-0000003",
             fernet=fernet,
         )
-        self.executor_getter: Literal["jusuf", "dask"] = executor_getter
+        self.executor_getter: Literal["slurm", "jusuf", "dask"] = executor_getter
         self.branch = branch
 
     def get_sbatch_launch_script(
@@ -702,7 +702,9 @@ class JusufSshJobLauncher(SshJobLauncher):
         redis_pid_file = f"{working_dir}/redis.pid"
         redis_unix_socket_path = f"{working_dir}/redis.sock"
 
-        if self.executor_getter == "jusuf":
+        if self.executor_getter == "slurm":
+            workflow_slurm_prefix = "srun -n 16 --overlap -u --cpus-per-task 16 --threads-per-core=1"
+        elif self.executor_getter == "jusuf":
             workflow_slurm_prefix = "srun -n 1 --overlap -u --cpus-per-task 120 --threads-per-core=1"
         elif self.executor_getter == "dask":
             workflow_slurm_prefix = "srun -n 10 --overlap -u --cpus-per-task 10 --threads-per-core=1"
@@ -711,8 +713,8 @@ class JusufSshJobLauncher(SshJobLauncher):
 
         out = textwrap.dedent(textwrap.indent(f"""\
             #!/bin/bash -l
-            #SBATCH --nodes=1
-            #SBATCH --ntasks=2
+            #SBATCH --nodes=2
+            #SBATCH --ntasks=16
             #SBATCH --partition=batch
             #SBATCH --hint=nomultithread
 
