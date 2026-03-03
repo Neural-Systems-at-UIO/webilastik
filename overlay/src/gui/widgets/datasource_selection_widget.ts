@@ -90,6 +90,10 @@ export class DataSourceSelectionWidget{
     private defaultBucketPath: Path;
     private defaultBucketName: string;
 
+    private static prevPrecompDataSource: AutoChooseScaleState = new NoDefaultScale();
+    private static prevDziDataSource: AutoChooseScaleState = new NoDefaultScale();
+    private static prevSingleScaleDataSource: AutoChooseScaleState = new NeverUseDefaultScale();
+
     constructor(params: {
         parentElement: HTMLElement,
         session: Session,
@@ -223,10 +227,6 @@ export class DataSourceSelectionWidget{
             params.session.getDatasourcesFromUrl(new GetDatasourcesFromUrlParamsDto({url: url.toDto()}))
         ]))
 
-        let prevPrecompDataSource: AutoChooseScaleState = new NoDefaultScale()
-        let prevDziDataSource: AutoChooseScaleState = new NoDefaultScale()
-        let prevSingleScaleDataSource = new NeverUseDefaultScale()
-
         for(const [url, dsPromise] of datasourcePromises.entries()){
             const datasourcesResult = await PopupWidget.WaitPopup({title: `Getting datasources...`, operation: dsPromise});
             if(datasourcesResult instanceof Error){
@@ -238,11 +238,11 @@ export class DataSourceSelectionWidget{
             }
             let chosenScales: FsDataSource[]
             if(datasourcesResult[0] instanceof PrecomputedChunksDataSource){
-                ({nextState: prevPrecompDataSource, chosenScales} = await prevPrecompDataSource.chooseScales(datasourcesResult))
+                ({nextState: this.prevPrecompDataSource, chosenScales} = await this.prevPrecompDataSource.chooseScales(datasourcesResult))
             }else if(datasourcesResult[0] instanceof DziLevelDataSource){
-                ({nextState: prevDziDataSource, chosenScales} = await prevDziDataSource.chooseScales(datasourcesResult))
+                ({nextState: this.prevDziDataSource, chosenScales} = await this.prevDziDataSource.chooseScales(datasourcesResult))
             }else{
-                ({nextState: prevSingleScaleDataSource, chosenScales} = await prevSingleScaleDataSource.chooseScales(datasourcesResult))
+                ({nextState: this.prevSingleScaleDataSource, chosenScales} = await this.prevSingleScaleDataSource.chooseScales(datasourcesResult))
             }
             out.set(url, chosenScales)
         }
