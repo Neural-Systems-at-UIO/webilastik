@@ -36,6 +36,7 @@ export class SessionManagerWidget{
     sessionDurationInput: NumberInput;
     private warnedUserOfImpendingClose = false
     hpcSiteInput: Select<HpcSiteName>;
+    numNodesInput: Select<number>;
     private sessionRejoinForm: Form;
     private readonly container: CollapsableWidget;
     private readonly configs: StartupConfigs;
@@ -159,7 +160,17 @@ export class SessionManagerWidget{
                     new Label({parentElement: undefined, innerText: "Timeout (minutes): "}),
                     this.timeoutInput = new NumberInput({parentElement: undefined, value: 15, min: 1}),
                 ]
-            })
+            }),
+            new Paragraph({parentElement: undefined, cssClasses: [CssClasses.ItkInputParagraph], children: [
+                new Label({parentElement: undefined, innerText: "Number of nodes: "}),
+                this.numNodesInput = new Select<number>({
+                    parentElement: undefined,
+                    popupTitle: "Select number of nodes",
+                    options: [2, 4],
+                    value: 4,
+                    renderer: (n) => new Span({parentElement: undefined, innerText: String(n)}),
+                }),
+            ]})
         ]})
 
         sessionCreationForm.preventSubmitWith(async () => {
@@ -195,6 +206,7 @@ export class SessionManagerWidget{
                 rpcParams: new CreateComputeSessionParamsDto({
                     hpc_site: this.hpcSiteInput.value,
                     session_duration_minutes: sessionDurationMinutes,
+                    num_nodes: this.numNodesInput.value,
                 }),
                 onProgress: (message) => this.logMessage(message),
                 onUsageError: (message) => {new ErrorPopupWidget({message: message})},

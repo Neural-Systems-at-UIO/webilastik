@@ -335,7 +335,8 @@ class SshJobLauncher:
         session_allocator_host: Hostname,
         session_allocator_username: Username,
         session_allocator_ssh_port: int,
-        session_allocator_socket_path: Path
+        session_allocator_socket_path: Path,
+        num_nodes: int = 4,
     ) -> "str":
         pass
 
@@ -351,7 +352,8 @@ class SshJobLauncher:
         session_allocator_host: Hostname,
         session_allocator_username: Username,
         session_allocator_ssh_port: int,
-        session_allocator_socket_path: Path
+        session_allocator_socket_path: Path,
+        num_nodes: int = 4,
     ) -> "ComputeSession | Exception":
         output_result = await self.do_ssh(
             command="sbatch",
@@ -370,6 +372,7 @@ class SshJobLauncher:
                 session_allocator_username=session_allocator_username,
                 session_allocator_ssh_port=session_allocator_ssh_port,
                 session_allocator_socket_path=session_allocator_socket_path,
+                num_nodes=num_nodes,
             ),
         )
         if isinstance(output_result, Exception):
@@ -493,7 +496,8 @@ class LocalJobLauncher(SshJobLauncher):
         session_allocator_host: Hostname,
         session_allocator_username: Username,
         session_allocator_ssh_port: int,
-        session_allocator_socket_path: Path
+        session_allocator_socket_path: Path,
+        num_nodes: int = 4,
     ) -> str:
         working_dir = Path(f"/tmp/{compute_session_id}")
         job_config = WorkflowConfig(
@@ -679,7 +683,8 @@ class JusufSshJobLauncher(SshJobLauncher):
         session_allocator_host: Hostname,
         session_allocator_username: Username,
         session_allocator_ssh_port: int,
-        session_allocator_socket_path: Path
+        session_allocator_socket_path: Path,
+        num_nodes: int = 4,
     ) -> str:
         scratch_dir = Path(f"/p/scratch/{self.account}")
         working_dir = scratch_dir / str(compute_session_id)
@@ -702,19 +707,27 @@ class JusufSshJobLauncher(SshJobLauncher):
         redis_pid_file = f"{working_dir}/redis.pid"
         redis_unix_socket_path = f"{working_dir}/redis.sock"
 
+        # Keep task count fixed; scale cpus-per-task linearly with num_nodes (baseline: 2 nodes)
+        node_scale = num_nodes // 2 or 1
         if self.executor_getter == "slurm":
-            workflow_slurm_prefix = "srun -n 16 --overlap -u --cpus-per-task 16 --threads-per-core=1"
+            num_tasks = 16
+            cpus_per_task = 16 * node_scale
+            workflow_slurm_prefix = f"srun -n {num_tasks} --overlap -u --cpus-per-task {cpus_per_task} --threads-per-core=1"
         elif self.executor_getter == "jusuf":
-            workflow_slurm_prefix = "srun -n 1 --overlap -u --cpus-per-task 120 --threads-per-core=1"
+            num_tasks = 1
+            cpus_per_task = 120 * node_scale
+            workflow_slurm_prefix = f"srun -n {num_tasks} --overlap -u --cpus-per-task {cpus_per_task} --threads-per-core=1"
         elif self.executor_getter == "dask":
-            workflow_slurm_prefix = "srun -n 10 --overlap -u --cpus-per-task 10 --threads-per-core=1"
+            num_tasks = 10
+            cpus_per_task = 10 * node_scale
+            workflow_slurm_prefix = f"srun -n {num_tasks} --overlap -u --cpus-per-task {cpus_per_task} --threads-per-core=1"
         else:
             assert_never(self.executor_getter)
 
         out = textwrap.dedent(textwrap.indent(f"""\
             #!/bin/bash -l
-            #SBATCH --nodes=2
-            #SBATCH --ntasks=16
+            #SBATCH --nodes={num_nodes}
+            #SBATCH --ntasks={num_tasks}
             #SBATCH --partition=batch
             #SBATCH --hint=nomultithread
 
@@ -801,7 +814,8 @@ class CscsSshJobLauncher(SshJobLauncher):
         session_allocator_host: Hostname,
         session_allocator_username: Username,
         session_allocator_ssh_port: int,
-        session_allocator_socket_path: Path
+        session_allocator_socket_path: Path,
+        num_nodes: int = 4,
     ) -> str:
         working_dir = Path(f"$SCRATCH/{compute_session_id}")
         job_config = WorkflowConfig(
@@ -821,7 +835,7 @@ class CscsSshJobLauncher(SshJobLauncher):
         conda_env_dir = f"{home}/miniconda3/envs/webilastik"
         redis_pid_file = f"{working_dir}/redis.pid"
         redis_port = "6379"
-        num_nodes = 10
+        # num_nodes comes from the method parameter — do not shadow it here
 
         out =  textwrap.dedent(textwrap.indent(f"""\
             #!/bin/bash

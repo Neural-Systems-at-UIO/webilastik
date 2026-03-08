@@ -241,7 +241,7 @@ class SessionAllocator:
         params = CreateComputeSessionParamsDto.from_json_value(json_payload)
         if isinstance(params, MessageParsingError) or params.hpc_site not in self.session_launchers:
             return uncachable_json_response(RpcErrorDto(error="Bad payload").to_json_value(), status=400)
-        requested_session_resources = Minutes(params.session_duration_minutes) * ComputeNodes(1) #FIXME: allow setting num compute modes
+        requested_session_resources = Minutes(params.session_duration_minutes) * ComputeNodes(params.num_nodes)
 
         async with self.quotas_lock:
             if user_token.user_id not in self.session_user_locks:
@@ -311,6 +311,7 @@ class SessionAllocator:
                 session_allocator_ssh_port=self.session_allocator_ssh_port,
                 session_allocator_socket_path=Path(f"/tmp/to-session-{compute_session_id}"),
                 session_url=self._make_compute_session_url(compute_session_id=compute_session_id),
+                num_nodes=params.num_nodes,
             )
 
             if isinstance(session_result, Exception):

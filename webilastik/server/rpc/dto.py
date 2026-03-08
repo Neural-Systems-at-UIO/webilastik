@@ -3645,9 +3645,13 @@ def parse_as_CreateComputeSessionParamsDto(
     )
     if isinstance(tmp_hpc_site, MessageParsingError):
         return tmp_hpc_site
+    tmp_num_nodes = parse_as_int(value.get("num_nodes", 4))
+    if isinstance(tmp_num_nodes, MessageParsingError):
+        return tmp_num_nodes
     return CreateComputeSessionParamsDto(
         session_duration_minutes=tmp_session_duration_minutes,
         hpc_site=tmp_hpc_site,
+        num_nodes=tmp_num_nodes,
     )
 
 
@@ -3655,12 +3659,14 @@ def parse_as_CreateComputeSessionParamsDto(
 class CreateComputeSessionParamsDto(DataTransferObject):
     session_duration_minutes: int
     hpc_site: HpcSiteName
+    num_nodes: int = 4
 
     def to_json_value(self) -> JsonObject:
         return {
             "__class__": "CreateComputeSessionParamsDto",
             "session_duration_minutes": self.session_duration_minutes,
             "hpc_site": self.hpc_site,
+            "num_nodes": self.num_nodes,
         }
 
     @classmethod

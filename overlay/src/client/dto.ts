@@ -3606,9 +3606,12 @@ export function parse_as_CreateComputeSessionParamsDto(
       valueObject.hpc_site,
     );
   if (temp_hpc_site instanceof MessageParsingError) return temp_hpc_site;
+  const temp_num_nodes = parse_as_int(valueObject.num_nodes !== undefined ? valueObject.num_nodes : 4);
+  if (temp_num_nodes instanceof MessageParsingError) return temp_num_nodes;
   return new CreateComputeSessionParamsDto({
     session_duration_minutes: temp_session_duration_minutes,
     hpc_site: temp_hpc_site,
+    num_nodes: temp_num_nodes,
   });
 }
 // Automatically generated via DataTransferObject for CreateComputeSessionParamsDto
@@ -3616,18 +3619,22 @@ export function parse_as_CreateComputeSessionParamsDto(
 export class CreateComputeSessionParamsDto {
   public session_duration_minutes: number;
   public hpc_site: "LOCAL_DASK" | "LOCAL_PROCESS_POOL" | "CSCS" | "JUSUF";
+  public num_nodes: number;
   constructor(_params: {
     session_duration_minutes: number;
     hpc_site: "LOCAL_DASK" | "LOCAL_PROCESS_POOL" | "CSCS" | "JUSUF";
+    num_nodes: number;
   }) {
     this.session_duration_minutes = _params.session_duration_minutes;
     this.hpc_site = _params.hpc_site;
+    this.num_nodes = _params.num_nodes;
   }
   public toJsonValue(): JsonObject {
     return {
       "__class__": "CreateComputeSessionParamsDto",
       session_duration_minutes: this.session_duration_minutes,
       hpc_site: this.hpc_site,
+      num_nodes: this.num_nodes,
     };
   }
   public static fromJsonValue(value: JsonValue): CreateComputeSessionParamsDto | MessageParsingError {
